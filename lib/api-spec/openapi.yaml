@@ -277,8 +277,11 @@ components:
         email:
           type: string
         password:
-          type: string
-          description: App password or IMAP password
+          type: ["string", "null"]
+          description: App password or IMAP password (required unless oauthToken is provided)
+        oauthToken:
+          type: ["string", "null"]
+          description: Google OAuth access token (used instead of password for Gmail OAuth sign-in)
         imapHost:
           type: ["string", "null"]
           description: Required for custom provider
@@ -288,7 +291,6 @@ components:
       required:
         - provider
         - email
-        - password
 
     EmailConnectionStatus:
       type: object
@@ -317,6 +319,9 @@ components:
         daysBack:
           type: ["integer", "null"]
           description: How many days back to look (default 180)
+        oauthToken:
+          type: ["string", "null"]
+          description: Fresh Google OAuth access token (required when session uses OAuth auth)
       required: []
 
     ScanEmailsResponse:

@@ -17,8 +17,16 @@ export interface ConnectEmailBody {
   /** Email provider slug: gmail, outlook, yahoo, custom */
   provider: string;
   email: string;
-  /** App password or IMAP password */
-  password: string;
+  /**
+   * App password or IMAP password (required unless oauthToken is provided)
+   * @nullable
+   */
+  password?: string | null;
+  /**
+   * Google OAuth access token (used instead of password for Gmail OAuth sign-in)
+   * @nullable
+   */
+  oauthToken?: string | null;
   /**
    * Required for custom provider
    * @nullable
@@ -55,6 +63,11 @@ export interface ScanEmailsBody {
    * @nullable
    */
   daysBack?: number | null;
+  /**
+   * Fresh Google OAuth access token (required when session uses OAuth auth)
+   * @nullable
+   */
+  oauthToken?: string | null;
 }
 
 export interface ScanEmailsResponse {

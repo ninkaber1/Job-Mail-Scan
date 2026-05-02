@@ -15,7 +15,7 @@ export interface ParsedApplication {
   sourceEmailId: string;
 }
 
-function buildImapClient(
+function buildImapClientPassword(
   host: string,
   port: number,
   email: string,
@@ -29,6 +29,34 @@ function buildImapClient(
     logger: false,
     tls: { rejectUnauthorized: false },
   });
+}
+
+function buildImapClientOAuth2(
+  host: string,
+  port: number,
+  email: string,
+  accessToken: string,
+): ImapFlow {
+  return new ImapFlow({
+    host,
+    port,
+    secure: true,
+    auth: { user: email, accessToken },
+    logger: false,
+    tls: { rejectUnauthorized: false },
+  });
+}
+
+function buildImapClient(
+  host: string,
+  port: number,
+  email: string,
+  credentials: { password: string } | { oauthToken: string },
+): ImapFlow {
+  if ("oauthToken" in credentials) {
+    return buildImapClientOAuth2(host, port, email, credentials.oauthToken);
+  }
+  return buildImapClientPassword(host, port, email, credentials.password);
 }
 
 const JOB_KEYWORDS = [
@@ -138,11 +166,11 @@ export async function scanEmails(
   host: string,
   port: number,
   email: string,
-  password: string,
+  credentials: { password: string } | { oauthToken: string },
   daysBack: number = 180,
   maxEmails: number = 200,
 ): Promise<ParsedApplication[]> {
-  const client = buildImapClient(host, port, email, password);
+  const client = buildImapClient(host, port, email, credentials);
   const results: ParsedApplication[] = [];
 
   await client.connect();
@@ -202,9 +230,9 @@ export async function testConnection(
   host: string,
   port: number,
   email: string,
-  password: string,
+  credentials: { password: string } | { oauthToken: string },
 ): Promise<void> {
-  const client = buildImapClient(host, port, email, password);
+  const client = buildImapClient(host, port, email, credentials);
   await client.connect();
   await client.logout();
 }

@@ -24,7 +24,18 @@ export const ConnectEmailBody = zod.object({
     .string()
     .describe("Email provider slug: gmail, outlook, yahoo, custom"),
   email: zod.string(),
-  password: zod.string().describe("App password or IMAP password"),
+  password: zod
+    .string()
+    .nullish()
+    .describe(
+      "App password or IMAP password (required unless oauthToken is provided)",
+    ),
+  oauthToken: zod
+    .string()
+    .nullish()
+    .describe(
+      "Google OAuth access token (used instead of password for Gmail OAuth sign-in)",
+    ),
   imapHost: zod.string().nullish().describe("Required for custom provider"),
   imapPort: zod
     .number()
@@ -83,6 +94,12 @@ export const ScanEmailsBody = zod.object({
     .number()
     .nullish()
     .describe("How many days back to look (default 180)"),
+  oauthToken: zod
+    .string()
+    .nullish()
+    .describe(
+      "Fresh Google OAuth access token (required when session uses OAuth auth)",
+    ),
 });
 
 export const ScanEmailsResponse = zod.object({

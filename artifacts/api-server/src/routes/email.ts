@@ -37,7 +37,12 @@ router.post("/email/connect", async (req, res): Promise<void> => {
     return;
   }
 
-  const { provider, email, password, imapHost, imapPort } = parsed.data;
+  const { provider, email, password, oauthToken, imapHost, imapPort } = parsed.data;
+
+  if (!password && !oauthToken) {
+    res.status(400).json({ error: "Either password or oauthToken is required." });
+    return;
+  }
 
   let config;
   try {
@@ -47,8 +52,12 @@ router.post("/email/connect", async (req, res): Promise<void> => {
     return;
   }
 
+  const credentials = oauthToken
+    ? { oauthToken }
+    : { password: password! };
+
   try {
-    await testConnection(config.host, config.port, email, password);
+    await testConnection(config.host, config.port, email, credentials);
   } catch (err) {
     req.log.warn({ err }, "IMAP connection test failed");
     res.status(400).json({ error: "Could not connect to email. Please check your credentials." });
@@ -57,12 +66,15 @@ router.post("/email/connect", async (req, res): Promise<void> => {
 
   await db.delete(emailSessionsTable);
 
+  const authType = oauthToken ? "oauth_google" : "password";
+
   const [session] = await db
     .insert(emailSessionsTable)
     .values({
       provider,
       email,
-      encryptedPassword: obfuscate(password),
+      encryptedPassword: oauthToken ? "" : obfuscate(password!),
+      authType,
       imapHost: imapHost ?? null,
       imapPort: imapPort != null ? String(imapPort) : null,
     })
@@ -98,8 +110,6 @@ router.post("/email/scan", async (req, res): Promise<void> => {
     return;
   }
 
-  const password = deobfuscate(session.encryptedPassword);
-
   let config;
   try {
     config = getProviderConfig(
@@ -112,14 +122,27 @@ router.post("/email/scan", async (req, res): Promise<void> => {
     return;
   }
 
+  let credentials: { password: string } | { oauthToken: string };
+
+  if (session.authType === "oauth_google") {
+    const oauthToken = body.data.oauthToken;
+    if (!oauthToken) {
+      res.status(400).json({ error: "This account uses Google OAuth. Please provide a fresh oauthToken to scan." });
+      return;
+    }
+    credentials = { oauthToken };
+  } else {
+    credentials = { password: deobfuscate(session.encryptedPassword) };
+  }
+
   const daysBack = body.data.daysBack ?? 180;
   const maxEmails = body.data.maxEmails ?? 200;
 
-  req.log.info({ email: session.email, daysBack, maxEmails }, "Starting email scan");
+  req.log.info({ email: session.email, daysBack, maxEmails, authType: session.authType }, "Starting email scan");
 
   let scanned: Awaited<ReturnType<typeof scanEmails>>;
   try {
-    scanned = await scanEmails(config.host, config.port, session.email, password, daysBack, maxEmails);
+    scanned = await scanEmails(config.host, config.port, session.email, credentials, daysBack, maxEmails);
   } catch (err) {
     req.log.error({ err }, "Email scan failed");
     res.status(400).json({ error: `Scan failed: ${(err as Error).message}` });
