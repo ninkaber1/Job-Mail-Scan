@@ -7,7 +7,7 @@ import {
   obfuscate,
   deobfuscate,
 } from "../lib/email-providers";
-import { scanEmails, testConnection } from "../lib/email-scanner";
+import { scanEmails, testConnection, probeMailbox } from "../lib/email-scanner";
 import { eq, lt } from "drizzle-orm";
 
 const router: IRouter = Router();
@@ -278,6 +278,31 @@ router.post("/email/scan", async (req, res): Promise<void> => {
 
   req.log.info({ found: scanned.results.length, added, updated, deleted }, "Email scan complete");
   res.json({ found: scanned.results.length, added, updated });
+});
+
+// ─── Diagnostic probe (dev only) ──────────────────────────────────────────────
+router.post("/email/probe", async (req, res): Promise<void> => {
+  const [session] = await db.select().from(emailSessionsTable).limit(1);
+  if (!session) {
+    res.status(400).json({ error: "No email session" });
+    return;
+  }
+  let config;
+  try {
+    config = getProviderConfig(session.provider, session.imapHost, session.imapPort ? parseInt(session.imapPort, 10) : null);
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+    return;
+  }
+  const credentials = { password: deobfuscate(session.encryptedPassword) };
+  const mailbox = (req.body.mailbox as string | undefined) ?? "[Gmail]/All Mail";
+  const keyword = (req.body.keyword as string | undefined) ?? "interview";
+  try {
+    const result = await probeMailbox(config.host, config.port, session.email, credentials, mailbox, keyword);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
 });
 
 export default router;

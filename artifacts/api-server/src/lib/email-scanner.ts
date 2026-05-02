@@ -504,6 +504,60 @@ export async function scanEmails(
   return { results: allResults, sinceDate: since };
 }
 
+export interface MailboxProbeResult {
+  mailbox: string;
+  totalMessages: number;
+  recentSample: Array<{ uid: number; date: string; internalDate: string; subject: string }>;
+  keywordSample: Array<{ uid: number; date: string; internalDate: string; subject: string }>;
+}
+
+export async function probeMailbox(
+  host: string,
+  port: number,
+  email: string,
+  credentials: { password: string } | { oauthToken: string },
+  mailbox: string = "[Gmail]/All Mail",
+  keyword: string = "interview",
+): Promise<MailboxProbeResult> {
+  const client = buildImapClient(host, port, email, credentials);
+  await client.connect();
+  try {
+    const info = await client.mailboxOpen(mailbox);
+    const totalMessages = info.exists ?? 0;
+
+    // Most recent 10 UIDs by UID number
+    const allUids = await client.search({ all: true });
+    const recentUidNums = allUids.slice(-10);
+    const recentSample: MailboxProbeResult["recentSample"] = [];
+    for await (const env of client.fetch(recentUidNums, { envelope: true, internalDate: true }, { uid: true })) {
+      recentSample.push({
+        uid: env.uid,
+        date: env.envelope?.date?.toISOString() ?? "unknown",
+        internalDate: (env.internalDate as Date | undefined)?.toISOString() ?? "unknown",
+        subject: (env.envelope?.subject ?? "").slice(0, 100),
+      });
+    }
+
+    // Subject keyword search — first 10 and last 10
+    const kwUids = await client.search({ subject: keyword });
+    const kwSample = [...kwUids.slice(0, 5), ...kwUids.slice(-5)];
+    const kwUniq = [...new Set(kwSample)];
+    const keywordSample: MailboxProbeResult["keywordSample"] = [];
+    for await (const env of client.fetch(kwUniq, { envelope: true, internalDate: true }, { uid: true })) {
+      keywordSample.push({
+        uid: env.uid,
+        date: env.envelope?.date?.toISOString() ?? "unknown",
+        internalDate: (env.internalDate as Date | undefined)?.toISOString() ?? "unknown",
+        subject: (env.envelope?.subject ?? "").slice(0, 100),
+      });
+    }
+
+    return { mailbox, totalMessages, recentSample, keywordSample };
+  } finally {
+    await client.logout();
+  }
+}
+
 export async function testConnection(
   host: string,
   port: number,
