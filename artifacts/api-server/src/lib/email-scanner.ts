@@ -291,6 +291,36 @@ methodOfContact: use the platform if an interview link/invite is included (Zoom,
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
+// ─── Job-related subject keywords for IMAP server-side search ────────────────
+
+// These keywords are passed to IMAP SEARCH so Gmail's server filters emails
+// before we download anything — no count cap needed.
+const JOB_SUBJECT_KEYWORDS = [
+  "interview",
+  "offer",
+  "application",
+  "recruiter",
+  "position",
+  "hiring",
+  "opportunity",
+  "screening",
+  "background check",
+  "onboarding",
+  "assessment",
+  "job",
+];
+
+type ImapSearchObject = Parameters<ImapFlow["search"]>[0];
+
+function buildSubjectOrSearch(keywords: string[], since: Date): ImapSearchObject {
+  const searches: ImapSearchObject[] = keywords.map((kw) => ({ since, subject: kw }));
+  function nest(items: ImapSearchObject[]): ImapSearchObject {
+    if (items.length === 1) return items[0];
+    return { or: [items[0], nest(items.slice(1))] as [ImapSearchObject, ImapSearchObject] };
+  }
+  return nest(searches);
+}
+
 // ─── Per-mailbox scan helper ─────────────────────────────────────────────────
 
 async function scanMailbox(
@@ -309,34 +339,32 @@ async function scanMailbox(
 
   logger.info({ mailbox }, "Opened mailbox for scan");
 
-  const messageUids = await client.search({ since });
+  // Use server-side subject keyword search so Gmail filters on the server —
+  // this avoids the N-cap problem where emails with the right dates but
+  // ranked below the slice boundary are silently dropped.
+  const searchQuery = buildSubjectOrSearch(JOB_SUBJECT_KEYWORDS, since);
+  const keywordUids = await client.search(searchQuery);
+
+  // Also grab the most recent maxEmails by UID (recency catch-all for emails
+  // with job content in the body but generic subjects like "Follow-up").
+  const allRecentUids = await client.search({ since });
+  const recentUids = allRecentUids.slice(-maxEmails);
+
+  // Union, deduplicate
+  const uidSet = new Set([...keywordUids, ...recentUids]);
+  const messageUids = [...uidSet];
 
   if (messageUids.length === 0) {
     logger.info({ mailbox, since: since.toISOString() }, "No emails found in date range");
     return [];
   }
 
-  // UIDs inside a mailbox are not chronological (especially Gmail All Mail
-  // and Spam). Fetch lightweight envelopes for all matching UIDs first, sort
-  // by the Date: header, then fetch full source for the most recent N only.
-  logger.info({ mailbox, total: messageUids.length }, "Fetching envelopes to sort by date");
-
-  const uidDates: Array<{ uid: number; date: Date }> = [];
-  for await (const env of client.fetch(messageUids, { envelope: true }, { uid: true })) {
-    const date = env.envelope?.date ?? new Date(0);
-    uidDates.push({ uid: env.uid, date });
-  }
-
-  uidDates.sort((a, b) => b.date.getTime() - a.date.getTime());
-  const recentUids = uidDates.slice(0, maxEmails).map(e => e.uid);
-
   logger.info({
     mailbox,
+    keywordMatches: keywordUids.length,
+    recentFallback: recentUids.length,
     total: messageUids.length,
-    scanning: recentUids.length,
     since: since.toISOString(),
-    newestInBatch: uidDates[0]?.date.toISOString(),
-    oldestInBatch: uidDates[recentUids.length - 1]?.date.toISOString(),
   }, "Fetching email bodies for scan");
 
   const results: ParsedApplication[] = [];
@@ -346,7 +374,7 @@ async function scanMailbox(
   let classified = 0;
   let duplicate = 0;
 
-  for await (const msg of client.fetch(recentUids, { source: true, uid: true }, { uid: true })) {
+  for await (const msg of client.fetch(messageUids, { source: true, uid: true }, { uid: true })) {
     try {
       const parsed = await simpleParser(msg.source);
       const subject = parsed.subject ?? "";
