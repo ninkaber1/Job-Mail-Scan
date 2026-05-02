@@ -1,14 +1,47 @@
 import { Router, type IRouter } from "express";
+import { clerkClient, getAuth } from "@clerk/express";
 import { db, emailSessionsTable, applicationsTable } from "@workspace/db";
+import { ConnectEmailBody, ScanEmailsBody } from "@workspace/api-zod";
 import {
-  ConnectEmailBody,
-  ScanEmailsBody,
-} from "@workspace/api-zod";
-import { getProviderConfig, obfuscate, deobfuscate } from "../lib/email-providers";
+  getProviderConfig,
+  obfuscate,
+  deobfuscate,
+} from "../lib/email-providers";
 import { scanEmails, testConnection } from "../lib/email-scanner";
 import { eq } from "drizzle-orm";
 
 const router: IRouter = Router();
+
+async function getClerkGoogleToken(
+  userId: string,
+): Promise<{ token: string } | { error: string; scopesMissing?: boolean }> {
+  const tokens = await clerkClient.users.getUserOauthAccessToken(
+    userId,
+    "google",
+  );
+
+  if (!tokens.data?.length) {
+    return {
+      error:
+        "No Google OAuth token found. Make sure you signed in with Google and try reconnecting.",
+    };
+  }
+
+  const tokenObj = tokens.data[0];
+  const scopes = tokenObj.scopes ?? [];
+
+  if (!scopes.includes("https://mail.google.com/")) {
+    return {
+      error:
+        `Gmail access not granted. Your Google sign-in doesn't include Gmail scope. ` +
+        `To fix: go to your Clerk dashboard → SSO Connections → Google → add ` +
+        `"https://mail.google.com/" to scopes, then sign out and sign back in.`,
+      scopesMissing: true,
+    };
+  }
+
+  return { token: tokenObj.token };
+}
 
 router.get("/email/status", async (req, res): Promise<void> => {
   const [session] = await db
@@ -18,7 +51,12 @@ router.get("/email/status", async (req, res): Promise<void> => {
     .limit(1);
 
   if (!session) {
-    res.json({ connected: false, email: null, provider: null, lastScanned: null });
+    res.json({
+      connected: false,
+      email: null,
+      provider: null,
+      lastScanned: null,
+    });
     return;
   }
 
@@ -37,12 +75,7 @@ router.post("/email/connect", async (req, res): Promise<void> => {
     return;
   }
 
-  const { provider, email, password, oauthToken, imapHost, imapPort } = parsed.data;
-
-  if (!password && !oauthToken) {
-    res.status(400).json({ error: "Either password or oauthToken is required." });
-    return;
-  }
+  const { provider, email, password, imapHost, imapPort } = parsed.data;
 
   let config;
   try {
@@ -52,28 +85,54 @@ router.post("/email/connect", async (req, res): Promise<void> => {
     return;
   }
 
-  const credentials = oauthToken
-    ? { oauthToken }
-    : { password: password! };
+  let credentials: { password: string } | { oauthToken: string };
+  let authType: string;
+
+  if (!password) {
+    const { userId } = getAuth(req);
+    if (!userId) {
+      res
+        .status(400)
+        .json({
+          error:
+            "Either a password or a Google sign-in session is required to connect.",
+        });
+      return;
+    }
+
+    const result = await getClerkGoogleToken(userId);
+    if ("error" in result) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+
+    credentials = { oauthToken: result.token };
+    authType = "oauth_google";
+  } else {
+    credentials = { password };
+    authType = "password";
+  }
 
   try {
     await testConnection(config.host, config.port, email, credentials);
   } catch (err) {
     req.log.warn({ err }, "IMAP connection test failed");
-    res.status(400).json({ error: "Could not connect to email. Please check your credentials." });
+    res.status(400).json({
+      error:
+        "Could not connect to email. Please check your credentials and try again.",
+    });
     return;
   }
 
   await db.delete(emailSessionsTable);
-
-  const authType = oauthToken ? "oauth_google" : "password";
 
   const [session] = await db
     .insert(emailSessionsTable)
     .values({
       provider,
       email,
-      encryptedPassword: oauthToken ? "" : obfuscate(password!),
+      encryptedPassword:
+        authType === "password" ? obfuscate(password as string) : "",
       authType,
       imapHost: imapHost ?? null,
       imapPort: imapPort != null ? String(imapPort) : null,
@@ -100,13 +159,13 @@ router.post("/email/scan", async (req, res): Promise<void> => {
     return;
   }
 
-  const [session] = await db
-    .select()
-    .from(emailSessionsTable)
-    .limit(1);
+  const [session] = await db.select().from(emailSessionsTable).limit(1);
 
   if (!session) {
-    res.status(400).json({ error: "No email connected. Please connect an email account first." });
+    res.status(400).json({
+      error:
+        "No email connected. Please connect an email account first.",
+    });
     return;
   }
 
@@ -125,12 +184,19 @@ router.post("/email/scan", async (req, res): Promise<void> => {
   let credentials: { password: string } | { oauthToken: string };
 
   if (session.authType === "oauth_google") {
-    const oauthToken = body.data.oauthToken;
-    if (!oauthToken) {
-      res.status(400).json({ error: "This account uses Google OAuth. Please provide a fresh oauthToken to scan." });
+    const { userId } = getAuth(req);
+    if (!userId) {
+      res.status(401).json({ error: "Authentication required." });
       return;
     }
-    credentials = { oauthToken };
+
+    const result = await getClerkGoogleToken(userId);
+    if ("error" in result) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+
+    credentials = { oauthToken: result.token };
   } else {
     credentials = { password: deobfuscate(session.encryptedPassword) };
   }
@@ -138,14 +204,26 @@ router.post("/email/scan", async (req, res): Promise<void> => {
   const daysBack = body.data.daysBack ?? 180;
   const maxEmails = body.data.maxEmails ?? 200;
 
-  req.log.info({ email: session.email, daysBack, maxEmails, authType: session.authType }, "Starting email scan");
+  req.log.info(
+    { email: session.email, daysBack, maxEmails, authType: session.authType },
+    "Starting email scan",
+  );
 
   let scanned: Awaited<ReturnType<typeof scanEmails>>;
   try {
-    scanned = await scanEmails(config.host, config.port, session.email, credentials, daysBack, maxEmails);
+    scanned = await scanEmails(
+      config.host,
+      config.port,
+      session.email,
+      credentials,
+      daysBack,
+      maxEmails,
+    );
   } catch (err) {
     req.log.error({ err }, "Email scan failed");
-    res.status(400).json({ error: `Scan failed: ${(err as Error).message}` });
+    res
+      .status(400)
+      .json({ error: `Scan failed: ${(err as Error).message}` });
     return;
   }
 
