@@ -344,13 +344,6 @@ export async function scanEmails(
         const date = parsed.date ?? new Date();
         const msgId = parsed.messageId ?? `uid-${msg.uid}`;
 
-        // Sanity-check: skip emails whose parsed date is outside the scan window
-        // (can happen with forwarded or re-labeled emails in Gmail)
-        if (date < since) {
-          logger.debug({ subject, fromEmail, date: date.toISOString(), since: since.toISOString() }, "Skipping email outside scan window");
-          continue;
-        }
-
         // Use plain text if available, fall back to HTML
         const textBody =
           typeof parsed.text === "string" && parsed.text.trim()
