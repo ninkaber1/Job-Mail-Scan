@@ -177,8 +177,21 @@ function isJobRelated(fromEmail: string, subject: string, body: string): boolean
   // Check always-include first (overrides keyword check)
   if (isAlwaysInclude(fromEmail, subject)) return true;
 
-  const combined = (subject + " " + body.slice(0, 1000)).toLowerCase();
-  return JOB_KEYWORDS.some((kw) => combined.includes(kw));
+  // Broad keyword pass — searches subject + first 2000 chars of body
+  const combined = (subject + " " + body.slice(0, 2000)).toLowerCase();
+  if (JOB_KEYWORDS.some((kw) => combined.includes(kw))) return true;
+
+  // Additional loose signals that are strong enough on their own
+  const subj = subject.toLowerCase();
+  if (subj.includes("schedule") && (subj.includes("call") || subj.includes("chat") || subj.includes("meeting"))) return true;
+  if (subj.includes("following up") || subj.includes("next steps")) return true;
+  if (subj.includes("phone screen") || subj.includes("technical screen") || subj.includes("tech screen")) return true;
+  if (subj.includes("zoom") || subj.includes("google meet") || subj.includes("teams call")) return true;
+  if (subj.includes("excited to") || subj.includes("congrats") || subj.includes("congratulations")) return true;
+  if (subj.includes("we'd like to") || subj.includes("we would like to")) return true;
+  if (subj.includes("moving forward") || subj.includes("next round")) return true;
+
+  return false;
 }
 
 // ─── AI classification ───────────────────────────────────────────────────────
@@ -248,7 +261,7 @@ Result rules:
 methodOfContact: use the platform if an interview link/invite is included (Zoom, Teams, Google Meet); otherwise "email".`;
 
   const response = await openai.chat.completions.create({
-    model: "gpt-5-mini",
+    model: "gpt-4o-mini",
     max_completion_tokens: 512,
     messages: [{ role: "user", content: prompt }],
   });
