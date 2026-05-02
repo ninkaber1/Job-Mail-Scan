@@ -296,29 +296,35 @@ export async function scanEmails(
   port: number,
   email: string,
   credentials: { password: string } | { oauthToken: string },
-  daysBack: number = 180,
+  daysBack: number = 90,
   maxEmails: number = 200,
-): Promise<ParsedApplication[]> {
+): Promise<{ results: ParsedApplication[]; sinceDate: Date }> {
   const client = buildImapClient(host, port, email, credentials);
   const results: ParsedApplication[] = [];
 
   await client.connect();
 
+  const since = new Date();
+  since.setDate(since.getDate() - daysBack);
+
   try {
     await client.mailboxOpen("INBOX");
-
-    const since = new Date();
-    since.setDate(since.getDate() - daysBack);
 
     const messageUids = await client.search({ since });
 
     if (messageUids.length === 0) {
-      logger.info({ email }, "No emails found in date range");
-      return results;
+      logger.info({ email, since: since.toISOString(), daysBack }, "No emails found in date range");
+      return { results, sinceDate: since };
     }
 
+    // Take the most recent N emails within the window
     const uids = messageUids.slice(-maxEmails);
-    logger.info({ count: uids.length, email }, "Fetching emails for scan");
+    logger.info({ total: messageUids.length, scanning: uids.length, email, since: since.toISOString() }, "Fetching emails for scan");
+
+    let excluded = 0;
+    let notJobRelated = 0;
+    let aiSkipped = 0;
+    let classified = 0;
 
     for await (const msg of client.fetch(uids, { source: true, uid: true }, { uid: true })) {
       try {
@@ -330,6 +336,13 @@ export async function scanEmails(
         const date = parsed.date ?? new Date();
         const msgId = parsed.messageId ?? `uid-${msg.uid}`;
 
+        // Sanity-check: skip emails whose parsed date is outside the scan window
+        // (can happen with forwarded or re-labeled emails in Gmail)
+        if (date < since) {
+          logger.debug({ subject, fromEmail, date: date.toISOString(), since: since.toISOString() }, "Skipping email outside scan window");
+          continue;
+        }
+
         // Use plain text if available, fall back to HTML
         const textBody =
           typeof parsed.text === "string" && parsed.text.trim()
@@ -338,27 +351,42 @@ export async function scanEmails(
 
         // Hard exclusion check first
         if (isExcluded(fromEmail, fromName, subject)) {
-          logger.debug({ subject, fromEmail }, "Excluded email (newsletter/alert)");
+          logger.info({ subject, fromEmail, date: date.toISOString() }, "Email excluded (newsletter/alert)");
+          excluded++;
           continue;
         }
 
-        // Keyword / always-include check
-        if (!isJobRelated(fromEmail, subject, textBody)) continue;
+        // Keyword / pattern pre-filter
+        if (!isJobRelated(fromEmail, subject, textBody)) {
+          logger.info({ subject, fromEmail, date: date.toISOString() }, "Email skipped (no job keywords)");
+          notJobRelated++;
+          continue;
+        }
+
+        logger.info({ subject, fromEmail, date: date.toISOString() }, "Sending to AI for classification");
 
         const app = await classifyEmail(subject, fromName, fromEmail, textBody, date);
-        if (!app) continue;
+        if (!app) {
+          logger.info({ subject, fromEmail, date: date.toISOString() }, "AI skipped email");
+          aiSkipped++;
+          continue;
+        }
 
         app.sourceEmailId = msgId;
         results.push(app);
+        classified++;
+        logger.info({ subject, fromEmail, result: app.result, employer: app.employer }, "Email classified as job application");
       } catch (err) {
         logger.warn({ err }, "Failed to process individual email");
       }
     }
+
+    logger.info({ excluded, notJobRelated, aiSkipped, classified }, "Email scan filter summary");
   } finally {
     await client.logout();
   }
 
-  return results;
+  return { results, sinceDate: since };
 }
 
 export async function testConnection(

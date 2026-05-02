@@ -75,6 +75,7 @@ const connectFormSchema = z
 const scanFormSchema = z.object({
   daysBack: z.coerce.number().min(1).max(365).default(90),
   maxEmails: z.coerce.number().min(10).max(1000).default(200),
+  clearPrevious: z.boolean().default(true),
 });
 
 export default function ConnectEmail() {
@@ -114,7 +115,7 @@ export default function ConnectEmail() {
 
   const scanForm = useForm<z.infer<typeof scanFormSchema>>({
     resolver: zodResolver(scanFormSchema),
-    defaultValues: { daysBack: 90, maxEmails: 200 },
+    defaultValues: { daysBack: 90, maxEmails: 200, clearPrevious: true },
   });
 
   const watchProvider = connectForm.watch("provider");
@@ -337,6 +338,32 @@ export default function ConnectEmail() {
                       )}
                     />
                   </div>
+
+                  <FormField
+                    control={scanForm.control}
+                    name="clearPrevious"
+                    render={({ field }) => (
+                      <FormItem className="flex items-start gap-3 rounded-lg border p-3 bg-muted/30">
+                        <FormControl>
+                          <input
+                            type="checkbox"
+                            className="mt-0.5 h-4 w-4 accent-primary cursor-pointer"
+                            checked={field.value}
+                            onChange={(e) => field.onChange(e.target.checked)}
+                          />
+                        </FormControl>
+                        <div className="space-y-0.5">
+                          <FormLabel className="cursor-pointer">
+                            Replace results from before this scan window
+                          </FormLabel>
+                          <p className="text-xs text-muted-foreground">
+                            When checked, applications older than {scanForm.watch("daysBack")} days are removed so the dashboard only shows what was found in this scan. Uncheck to keep older results.
+                          </p>
+                        </div>
+                      </FormItem>
+                    )}
+                  />
+
                   <Button type="submit" disabled={scanEmails.isPending}>
                     {scanEmails.isPending ? (
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />

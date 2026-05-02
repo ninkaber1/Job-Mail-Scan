@@ -8,7 +8,7 @@ import {
   deobfuscate,
 } from "../lib/email-providers";
 import { scanEmails, testConnection } from "../lib/email-scanner";
-import { eq } from "drizzle-orm";
+import { eq, lt } from "drizzle-orm";
 
 const router: IRouter = Router();
 
@@ -205,11 +205,13 @@ router.post("/email/scan", async (req, res): Promise<void> => {
     credentials = { password: deobfuscate(session.encryptedPassword) };
   }
 
-  const daysBack = body.data.daysBack ?? 180;
+  const daysBack = body.data.daysBack ?? 90;
   const maxEmails = body.data.maxEmails ?? 200;
+  // Default: clear entries outside the scan window so the dashboard reflects reality
+  const clearPrevious = body.data.clearPrevious !== false;
 
   req.log.info(
-    { email: session.email, daysBack, maxEmails, authType: session.authType },
+    { email: session.email, daysBack, maxEmails, clearPrevious, authType: session.authType },
     "Starting email scan",
   );
 
@@ -229,10 +231,22 @@ router.post("/email/scan", async (req, res): Promise<void> => {
     return;
   }
 
+  // Optionally remove applications that fall outside the scan window
+  let deleted = 0;
+  if (clearPrevious) {
+    const sinceStr = scanned.sinceDate.toISOString().split("T")[0];
+    const result = await db
+      .delete(applicationsTable)
+      .where(lt(applicationsTable.dateOfContact, sinceStr))
+      .returning({ id: applicationsTable.id });
+    deleted = result.length;
+    req.log.info({ deleted, since: sinceStr }, "Cleared applications outside scan window");
+  }
+
   let added = 0;
   let updated = 0;
 
-  for (const app of scanned) {
+  for (const app of scanned.results) {
     const existing = await db
       .select()
       .from(applicationsTable)
@@ -261,8 +275,8 @@ router.post("/email/scan", async (req, res): Promise<void> => {
     .set({ lastScanned: new Date() })
     .where(eq(emailSessionsTable.id, session.id));
 
-  req.log.info({ found: scanned.length, added, updated }, "Email scan complete");
-  res.json({ found: scanned.length, added, updated });
+  req.log.info({ found: scanned.results.length, added, updated, deleted }, "Email scan complete");
+  res.json({ found: scanned.results.length, added, updated });
 });
 
 export default router;

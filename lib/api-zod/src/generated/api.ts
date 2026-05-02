@@ -93,7 +93,13 @@ export const ScanEmailsBody = zod.object({
   daysBack: zod
     .number()
     .nullish()
-    .describe("How many days back to look (default 180)"),
+    .describe("How many days back to look (default 90)"),
+  clearPrevious: zod
+    .boolean()
+    .nullish()
+    .describe(
+      "If true, delete applications outside the scan window before inserting new results (default true)",
+    ),
   oauthToken: zod
     .string()
     .nullish()

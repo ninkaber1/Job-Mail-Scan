@@ -59,10 +59,15 @@ export interface ScanEmailsBody {
    */
   maxEmails?: number | null;
   /**
-   * How many days back to look (default 180)
+   * How many days back to look (default 90)
    * @nullable
    */
   daysBack?: number | null;
+  /**
+   * If true, delete applications outside the scan window before inserting new results (default true)
+   * @nullable
+   */
+  clearPrevious?: boolean | null;
   /**
    * Fresh Google OAuth access token (required when session uses OAuth auth)
    * @nullable

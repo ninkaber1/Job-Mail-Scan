@@ -318,7 +318,10 @@ components:
           description: Maximum number of emails to scan (default 200)
         daysBack:
           type: ["integer", "null"]
-          description: How many days back to look (default 180)
+          description: How many days back to look (default 90)
+        clearPrevious:
+          type: ["boolean", "null"]
+          description: If true, delete applications outside the scan window before inserting new results (default true)
         oauthToken:
           type: ["string", "null"]
           description: Fresh Google OAuth access token (required when session uses OAuth auth)
