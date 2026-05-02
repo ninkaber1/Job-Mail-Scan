@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -37,7 +36,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
 import {
   Mail,
   CheckCircle2,
@@ -45,14 +43,10 @@ import {
   AlertCircle,
   Loader2,
   RefreshCcw,
-  Sparkles,
+  ExternalLink,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 const connectFormSchema = z
   .object({
@@ -76,7 +70,7 @@ const connectFormSchema = z
   );
 
 const scanFormSchema = z.object({
-  daysBack: z.coerce.number().min(1).max(365).default(30),
+  daysBack: z.coerce.number().min(1).max(365).default(90),
   maxEmails: z.coerce.number().min(10).max(1000).default(200),
 });
 
@@ -90,11 +84,16 @@ export default function ConnectEmail() {
   const disconnectEmail = useDisconnectEmail();
   const scanEmails = useScanEmails();
 
+  const googleAccount = isUserLoaded
+    ? user?.externalAccounts?.find((a) => a.provider === "google")
+    : null;
+  const googleEmail = googleAccount?.emailAddress ?? null;
+
   const connectForm = useForm<z.infer<typeof connectFormSchema>>({
     resolver: zodResolver(connectFormSchema),
     defaultValues: {
       provider: "gmail",
-      email: "",
+      email: googleEmail ?? "",
       password: "",
       imapHost: "",
       imapPort: 993,
@@ -103,44 +102,13 @@ export default function ConnectEmail() {
 
   const scanForm = useForm<z.infer<typeof scanFormSchema>>({
     resolver: zodResolver(scanFormSchema),
-    defaultValues: { daysBack: 30, maxEmails: 200 },
+    defaultValues: { daysBack: 90, maxEmails: 200 },
   });
 
   const watchProvider = connectForm.watch("provider");
 
-  const googleAccount = isUserLoaded
-    ? user?.externalAccounts?.find((a) => a.provider === "google")
-    : null;
-  const googleEmail = googleAccount?.emailAddress ?? null;
-  const isGoogleUser = !!googleAccount;
-
   const invalidateStatus = () =>
     queryClient.invalidateQueries({ queryKey: getGetEmailStatusQueryKey() });
-
-  // Google OAuth connect — no token on the frontend; backend fetches it via Clerk
-  const onConnectWithGoogle = () => {
-    if (!googleEmail) return;
-    connectEmail.mutate(
-      { data: { provider: "gmail", email: googleEmail } },
-      {
-        onSuccess: () => {
-          toast({ title: "Gmail connected with Google!" });
-          invalidateStatus();
-        },
-        onError: (err) => {
-          const msg =
-            err.data?.error ?? err.message ?? "Could not connect Gmail with Google.";
-          const isScope = msg.toLowerCase().includes("scope");
-          toast({
-            title: isScope ? "Gmail scope not configured" : "Connection failed",
-            description: msg,
-            variant: "destructive",
-            duration: isScope ? 12000 : 5000,
-          });
-        },
-      },
-    );
-  };
 
   const onConnect = (data: z.infer<typeof connectFormSchema>) => {
     connectEmail.mutate(
@@ -154,7 +122,9 @@ export default function ConnectEmail() {
           toast({
             title: "Connection failed",
             description:
-              err.data?.error ?? err.message ?? "Please check your credentials and try again.",
+              err.data?.error ??
+              err.message ??
+              "Please check your credentials and try again.",
             variant: "destructive",
           });
         },
@@ -167,27 +137,29 @@ export default function ConnectEmail() {
       onSuccess: () => {
         toast({ title: "Email disconnected" });
         invalidateStatus();
-        connectForm.reset();
+        connectForm.reset({ provider: "gmail", email: googleEmail ?? "" });
       },
     });
   };
 
-  // Scan — no token needed; backend fetches fresh Google token when needed
   const onScan = (data: z.infer<typeof scanFormSchema>) => {
     scanEmails.mutate(
       { data },
       {
         onSuccess: (result) => {
           toast({
-            title: "Scan Complete",
-            description: `Found ${result.found} emails. Added ${result.added}, updated ${result.updated} applications.`,
+            title: "Scan complete",
+            description: `Found ${result.found} job-related emails. Added ${result.added}, updated ${result.updated} applications.`,
           });
           invalidateStatus();
         },
         onError: (err) => {
           toast({
             title: "Scan failed",
-            description: err.data?.error ?? err.message ?? "An error occurred while scanning.",
+            description:
+              err.data?.error ??
+              err.message ??
+              "An error occurred while scanning.",
             variant: "destructive",
           });
         },
@@ -204,8 +176,6 @@ export default function ConnectEmail() {
   }
 
   const isConnected = status?.connected;
-  const isOAuthSession =
-    isConnected && isGoogleUser && status?.email === googleEmail;
 
   return (
     <div className="max-w-3xl mx-auto space-y-8">
@@ -214,7 +184,7 @@ export default function ConnectEmail() {
           Email Setup
         </h1>
         <p className="text-muted-foreground mt-2">
-          Connect your email to let AI automatically find and track your job
+          Connect your email so AI can automatically find and track your job
           applications.
         </p>
       </div>
@@ -237,17 +207,14 @@ export default function ConnectEmail() {
               <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                 <div>
                   <dt className="text-muted-foreground">Account</dt>
-                  <dd className="font-medium text-foreground">{status.email}</dd>
+                  <dd className="font-medium text-foreground">
+                    {status.email}
+                  </dd>
                 </div>
                 <div>
                   <dt className="text-muted-foreground">Provider</dt>
-                  <dd className="font-medium text-foreground flex items-center gap-2">
-                    <span className="capitalize">{status.provider}</span>
-                    {isOAuthSession && (
-                      <Badge variant="secondary" className="text-xs gap-1">
-                        <Sparkles className="w-3 h-3" /> Google OAuth
-                      </Badge>
-                    )}
+                  <dd className="font-medium text-foreground capitalize">
+                    {status.provider}
                   </dd>
                 </div>
                 <div>
@@ -262,7 +229,7 @@ export default function ConnectEmail() {
                 </div>
               </dl>
             </CardContent>
-            <CardFooter className="flex justify-between border-t border-green-200/50 pt-4">
+            <CardFooter className="border-t border-green-200/50 pt-4">
               <Button
                 variant="outline"
                 className="text-red-600 hover:text-red-700 hover:bg-red-50"
@@ -281,9 +248,9 @@ export default function ConnectEmail() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Manual Scan</CardTitle>
+              <CardTitle>Scan Inbox</CardTitle>
               <CardDescription>
-                Trigger a scan of your inbox right now.
+                Trigger a manual scan of your inbox for job-related emails.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -326,7 +293,7 @@ export default function ConnectEmail() {
                     ) : (
                       <RefreshCcw className="w-4 h-4 mr-2" />
                     )}
-                    Scan Inbox Now
+                    Scan Now
                   </Button>
                 </form>
               </Form>
@@ -335,59 +302,12 @@ export default function ConnectEmail() {
         </div>
       ) : (
         <div className="space-y-6">
-          {isGoogleUser && googleEmail && (
-            <Card className="border-primary/30 bg-primary/5">
-              <CardHeader>
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-white border border-gray-200 flex items-center justify-center shadow-sm">
-                    <GoogleIcon />
-                  </div>
-                  <div>
-                    <CardTitle className="text-base">
-                      Connect Gmail with Google
-                    </CardTitle>
-                    <CardDescription>
-                      Use your existing Google sign-in — no App Password needed.
-                    </CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <div className="flex items-center gap-3 mb-4 p-3 bg-white rounded-lg border border-gray-100">
-                  <Mail className="w-4 h-4 text-muted-foreground shrink-0" />
-                  <span className="text-sm text-foreground font-medium">
-                    {googleEmail}
-                  </span>
-                  <Badge variant="outline" className="ml-auto text-xs">
-                    Gmail
-                  </Badge>
-                </div>
-                <Button
-                  className="w-full gap-2"
-                  onClick={onConnectWithGoogle}
-                  disabled={connectEmail.isPending}
-                >
-                  {connectEmail.isPending ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <GoogleIcon className="w-4 h-4" />
-                  )}
-                  Connect Gmail with Google
-                </Button>
-              </CardContent>
-            </Card>
-          )}
-
           <Card>
             <CardHeader>
-              <CardTitle>
-                {isGoogleUser
-                  ? "Or Connect with App Password"
-                  : "Connect Your Email"}
-              </CardTitle>
+              <CardTitle>Connect Your Email</CardTitle>
               <CardDescription>
-                Connect via IMAP. We never store your emails — only the
-                extracted job data.
+                We use IMAP to read your inbox. We never store your emails —
+                only the job application data extracted from them.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -432,10 +352,7 @@ export default function ConnectEmail() {
                         <FormItem>
                           <FormLabel>Email Address</FormLabel>
                           <FormControl>
-                            <Input
-                              placeholder="you@example.com"
-                              {...field}
-                            />
+                            <Input placeholder="you@example.com" {...field} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -450,7 +367,7 @@ export default function ConnectEmail() {
                           <FormControl>
                             <Input
                               type="password"
-                              placeholder="App Password"
+                              placeholder="16-character app password"
                               {...field}
                             />
                           </FormControl>
@@ -486,7 +403,11 @@ export default function ConnectEmail() {
                           <FormItem>
                             <FormLabel>IMAP Port</FormLabel>
                             <FormControl>
-                              <Input type="number" placeholder="993" {...field} />
+                              <Input
+                                type="number"
+                                placeholder="993"
+                                {...field}
+                              />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
@@ -496,18 +417,45 @@ export default function ConnectEmail() {
                   )}
 
                   {watchProvider === "gmail" && (
-                    <Alert className="bg-blue-50 border-blue-200">
-                      <AlertCircle className="h-4 w-4 text-blue-600" />
-                      <AlertTitle className="text-blue-800">
-                        App Password required
+                    <Alert className="bg-amber-50 border-amber-200">
+                      <AlertCircle className="h-4 w-4 text-amber-600" />
+                      <AlertTitle className="text-amber-800">
+                        Gmail requires an App Password
                       </AlertTitle>
-                      <AlertDescription className="text-blue-700 text-sm space-y-1">
-                        <p>Gmail blocks regular passwords for IMAP. Create an App Password:</p>
-                        <ol className="list-decimal list-inside space-y-0.5">
-                          <li>Enable 2-Step Verification in your Google Account</li>
-                          <li>Go to Security → App passwords</li>
-                          <li>Create a new App password and paste it above</li>
+                      <AlertDescription className="text-amber-700 text-sm space-y-2">
+                        <p>
+                          Gmail blocks your regular password for IMAP. You need
+                          to create a 16-character App Password:
+                        </p>
+                        <ol className="list-decimal list-inside space-y-1">
+                          <li>
+                            Enable{" "}
+                            <strong>2-Step Verification</strong> on your Google
+                            Account
+                          </li>
+                          <li>
+                            Go to{" "}
+                            <strong>
+                              myaccount.google.com → Security → App passwords
+                            </strong>
+                          </li>
+                          <li>
+                            Create a new App Password (select "Mail" and your
+                            device)
+                          </li>
+                          <li>
+                            Paste the 16-character password into the field above
+                          </li>
                         </ol>
+                        <a
+                          href="https://myaccount.google.com/apppasswords"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-amber-800 font-medium underline underline-offset-2 hover:text-amber-900 mt-1"
+                        >
+                          Open Google App Passwords
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
                       </AlertDescription>
                     </Alert>
                   )}
@@ -516,11 +464,15 @@ export default function ConnectEmail() {
                     <Alert className="bg-blue-50 border-blue-200">
                       <AlertCircle className="h-4 w-4 text-blue-600" />
                       <AlertTitle className="text-blue-800">
-                        App Password may be required
+                        Outlook App Password
                       </AlertTitle>
                       <AlertDescription className="text-blue-700 text-sm">
-                        If 2FA is enabled, go to account.microsoft.com → Security
-                        → Advanced security options → App passwords.
+                        If 2FA is enabled, go to{" "}
+                        <strong>
+                          account.microsoft.com → Security → Advanced security
+                          options → App passwords
+                        </strong>{" "}
+                        to create one.
                       </AlertDescription>
                     </Alert>
                   )}
@@ -542,32 +494,5 @@ export default function ConnectEmail() {
         </div>
       )}
     </div>
-  );
-}
-
-function GoogleIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className={className ?? "w-5 h-5"}
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <path
-        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-        fill="#4285F4"
-      />
-      <path
-        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-        fill="#34A853"
-      />
-      <path
-        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-        fill="#FBBC05"
-      />
-      <path
-        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-        fill="#EA4335"
-      />
-    </svg>
   );
 }
