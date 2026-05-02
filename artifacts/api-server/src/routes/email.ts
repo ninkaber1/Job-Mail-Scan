@@ -90,13 +90,12 @@ router.post("/email/connect", async (req, res): Promise<void> => {
 
   if (!password) {
     const { userId } = getAuth(req);
+    req.log.info({ userId: userId ?? "null", provider, email }, "Google OAuth connect attempt");
     if (!userId) {
-      res
-        .status(400)
-        .json({
-          error:
-            "Either a password or a Google sign-in session is required to connect.",
-        });
+      res.status(400).json({
+        error:
+          "Not authenticated. Please sign in and try again.",
+      });
       return;
     }
 

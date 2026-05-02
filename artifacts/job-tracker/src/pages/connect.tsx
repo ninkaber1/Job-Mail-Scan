@@ -128,7 +128,8 @@ export default function ConnectEmail() {
           invalidateStatus();
         },
         onError: (err) => {
-          const msg = err.error ?? "Could not connect Gmail with Google.";
+          const msg =
+            err.data?.error ?? err.message ?? "Could not connect Gmail with Google.";
           const isScope = msg.toLowerCase().includes("scope");
           toast({
             title: isScope ? "Gmail scope not configured" : "Connection failed",
@@ -153,7 +154,7 @@ export default function ConnectEmail() {
           toast({
             title: "Connection failed",
             description:
-              err.error ?? "Please check your credentials and try again.",
+              err.data?.error ?? err.message ?? "Please check your credentials and try again.",
             variant: "destructive",
           });
         },
@@ -186,7 +187,7 @@ export default function ConnectEmail() {
         onError: (err) => {
           toast({
             title: "Scan failed",
-            description: err.error ?? "An error occurred while scanning.",
+            description: err.data?.error ?? err.message ?? "An error occurred while scanning.",
             variant: "destructive",
           });
         },
