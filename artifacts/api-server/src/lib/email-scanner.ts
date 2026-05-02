@@ -298,6 +298,7 @@ export async function scanEmails(
   credentials: { password: string } | { oauthToken: string },
   daysBack: number = 90,
   maxEmails: number = 200,
+  provider: string = "gmail",
 ): Promise<{ results: ParsedApplication[]; sinceDate: Date }> {
   const client = buildImapClient(host, port, email, credentials);
   const results: ParsedApplication[] = [];
@@ -307,8 +308,15 @@ export async function scanEmails(
   const since = new Date();
   since.setDate(since.getDate() - daysBack);
 
+  // Gmail labels mean many legitimate emails never land in INBOX.
+  // [Gmail]/All Mail covers every received message regardless of labels.
+  // Outlook/Yahoo/iCloud use standard INBOX folders.
+  const mailbox =
+    provider.toLowerCase() === "gmail" ? "[Gmail]/All Mail" : "INBOX";
+
   try {
-    await client.mailboxOpen("INBOX");
+    await client.mailboxOpen(mailbox);
+    logger.info({ mailbox, provider }, "Opened mailbox for scan");
 
     const messageUids = await client.search({ since });
 

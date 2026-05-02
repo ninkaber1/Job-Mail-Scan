@@ -224,6 +224,7 @@ router.post("/email/scan", async (req, res): Promise<void> => {
       credentials,
       daysBack,
       maxEmails,
+      session.provider,
     );
   } catch (err) {
     req.log.error({ err }, "Email scan failed");
