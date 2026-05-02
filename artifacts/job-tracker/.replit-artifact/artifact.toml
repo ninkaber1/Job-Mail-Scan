@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Job Application Tracker"
+version = "1.0.0"
+id = "artifacts/job-tracker"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24486
+
+[services.development]
+run = "pnpm --filter @workspace/job-tracker run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/job-tracker", "run", "build" ]
+publicDir = "artifacts/job-tracker/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24486"
+BASE_PATH = "/"
