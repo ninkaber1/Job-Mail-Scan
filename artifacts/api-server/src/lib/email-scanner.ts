@@ -291,6 +291,119 @@ methodOfContact: use the platform if an interview link/invite is included (Zoom,
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
+// ─── Per-mailbox scan helper ─────────────────────────────────────────────────
+
+async function scanMailbox(
+  client: ImapFlow,
+  mailbox: string,
+  since: Date,
+  maxEmails: number,
+  seenIds: Set<string>,
+): Promise<ParsedApplication[]> {
+  try {
+    await client.mailboxOpen(mailbox);
+  } catch (err) {
+    logger.warn({ mailbox, err }, "Could not open mailbox, skipping");
+    return [];
+  }
+
+  logger.info({ mailbox }, "Opened mailbox for scan");
+
+  const messageUids = await client.search({ since });
+
+  if (messageUids.length === 0) {
+    logger.info({ mailbox, since: since.toISOString() }, "No emails found in date range");
+    return [];
+  }
+
+  // UIDs inside a mailbox are not chronological (especially Gmail All Mail
+  // and Spam). Fetch lightweight envelopes for all matching UIDs first, sort
+  // by the Date: header, then fetch full source for the most recent N only.
+  logger.info({ mailbox, total: messageUids.length }, "Fetching envelopes to sort by date");
+
+  const uidDates: Array<{ uid: number; date: Date }> = [];
+  for await (const env of client.fetch(messageUids, { envelope: true }, { uid: true })) {
+    const date = env.envelope?.date ?? new Date(0);
+    uidDates.push({ uid: env.uid, date });
+  }
+
+  uidDates.sort((a, b) => b.date.getTime() - a.date.getTime());
+  const recentUids = uidDates.slice(0, maxEmails).map(e => e.uid);
+
+  logger.info({
+    mailbox,
+    total: messageUids.length,
+    scanning: recentUids.length,
+    since: since.toISOString(),
+    newestInBatch: uidDates[0]?.date.toISOString(),
+    oldestInBatch: uidDates[recentUids.length - 1]?.date.toISOString(),
+  }, "Fetching email bodies for scan");
+
+  const results: ParsedApplication[] = [];
+  let excluded = 0;
+  let notJobRelated = 0;
+  let aiSkipped = 0;
+  let classified = 0;
+  let duplicate = 0;
+
+  for await (const msg of client.fetch(recentUids, { source: true, uid: true }, { uid: true })) {
+    try {
+      const parsed = await simpleParser(msg.source);
+      const subject = parsed.subject ?? "";
+      const fromAddress = parsed.from?.value[0];
+      const fromEmail = fromAddress?.address ?? "";
+      const fromName = fromAddress?.name ?? fromEmail;
+      const date = parsed.date ?? new Date();
+      const msgId = parsed.messageId ?? `uid-${msg.uid}`;
+
+      // Skip duplicates seen in a previous mailbox
+      if (seenIds.has(msgId)) {
+        duplicate++;
+        continue;
+      }
+      seenIds.add(msgId);
+
+      const textBody =
+        typeof parsed.text === "string" && parsed.text.trim()
+          ? parsed.text
+          : parsed.html ?? "";
+
+      if (isExcluded(fromEmail, fromName, subject)) {
+        logger.info({ subject, fromEmail, date: date.toISOString() }, "Email excluded (newsletter/alert)");
+        excluded++;
+        continue;
+      }
+
+      if (!isJobRelated(fromEmail, subject, textBody)) {
+        logger.info({ subject, fromEmail, date: date.toISOString() }, "Email skipped (no job keywords)");
+        notJobRelated++;
+        continue;
+      }
+
+      logger.info({ subject, fromEmail, date: date.toISOString() }, "Sending to AI for classification");
+
+      const app = await classifyEmail(subject, fromName, fromEmail, textBody, date);
+      if (!app) {
+        logger.info({ subject, fromEmail, date: date.toISOString() }, "AI skipped email");
+        aiSkipped++;
+        continue;
+      }
+
+      app.sourceEmailId = msgId;
+      results.push(app);
+      classified++;
+      logger.info({ mailbox, subject, fromEmail, result: app.result, employer: app.employer }, "Email classified as job application");
+    } catch (err) {
+      logger.warn({ err }, "Failed to process individual email");
+    }
+  }
+
+  logger.info({ mailbox, excluded, notJobRelated, aiSkipped, classified, duplicate }, "Mailbox scan filter summary");
+  return results;
+}
+
+// ─── Public scan entry point ─────────────────────────────────────────────────
+
 export async function scanEmails(
   host: string,
   port: number,
@@ -301,93 +414,35 @@ export async function scanEmails(
   provider: string = "gmail",
 ): Promise<{ results: ParsedApplication[]; sinceDate: Date }> {
   const client = buildImapClient(host, port, email, credentials);
-  const results: ParsedApplication[] = [];
+  const allResults: ParsedApplication[] = [];
 
   await client.connect();
 
   const since = new Date();
   since.setDate(since.getDate() - daysBack);
 
-  // Gmail labels mean many legitimate emails never land in INBOX.
-  // [Gmail]/All Mail covers every received message regardless of labels.
-  // Outlook/Yahoo/iCloud use standard INBOX folders.
-  const mailbox =
-    provider.toLowerCase() === "gmail" ? "[Gmail]/All Mail" : "INBOX";
+  // For Gmail we scan two mailboxes:
+  //   [Gmail]/All Mail  — everything except Spam/Trash
+  //   [Gmail]/Spam      — ATS/recruiter emails from large firms often land here
+  // For other providers, INBOX is the standard single mailbox.
+  const mailboxes =
+    provider.toLowerCase() === "gmail"
+      ? ["[Gmail]/All Mail", "[Gmail]/Spam"]
+      : ["INBOX"];
+
+  const seenIds = new Set<string>();
 
   try {
-    await client.mailboxOpen(mailbox);
-    logger.info({ mailbox, provider }, "Opened mailbox for scan");
-
-    const messageUids = await client.search({ since });
-
-    if (messageUids.length === 0) {
-      logger.info({ email, since: since.toISOString(), daysBack }, "No emails found in date range");
-      return { results, sinceDate: since };
+    for (const mailbox of mailboxes) {
+      const mbResults = await scanMailbox(client, mailbox, since, maxEmails, seenIds);
+      allResults.push(...mbResults);
     }
-
-    // Take the most recent N emails within the window
-    const uids = messageUids.slice(-maxEmails);
-    logger.info({ total: messageUids.length, scanning: uids.length, email, since: since.toISOString() }, "Fetching emails for scan");
-
-    let excluded = 0;
-    let notJobRelated = 0;
-    let aiSkipped = 0;
-    let classified = 0;
-
-    for await (const msg of client.fetch(uids, { source: true, uid: true }, { uid: true })) {
-      try {
-        const parsed = await simpleParser(msg.source);
-        const subject = parsed.subject ?? "";
-        const fromAddress = parsed.from?.value[0];
-        const fromEmail = fromAddress?.address ?? "";
-        const fromName = fromAddress?.name ?? fromEmail;
-        const date = parsed.date ?? new Date();
-        const msgId = parsed.messageId ?? `uid-${msg.uid}`;
-
-        // Use plain text if available, fall back to HTML
-        const textBody =
-          typeof parsed.text === "string" && parsed.text.trim()
-            ? parsed.text
-            : parsed.html ?? "";
-
-        // Hard exclusion check first
-        if (isExcluded(fromEmail, fromName, subject)) {
-          logger.info({ subject, fromEmail, date: date.toISOString() }, "Email excluded (newsletter/alert)");
-          excluded++;
-          continue;
-        }
-
-        // Keyword / pattern pre-filter
-        if (!isJobRelated(fromEmail, subject, textBody)) {
-          logger.info({ subject, fromEmail, date: date.toISOString() }, "Email skipped (no job keywords)");
-          notJobRelated++;
-          continue;
-        }
-
-        logger.info({ subject, fromEmail, date: date.toISOString() }, "Sending to AI for classification");
-
-        const app = await classifyEmail(subject, fromName, fromEmail, textBody, date);
-        if (!app) {
-          logger.info({ subject, fromEmail, date: date.toISOString() }, "AI skipped email");
-          aiSkipped++;
-          continue;
-        }
-
-        app.sourceEmailId = msgId;
-        results.push(app);
-        classified++;
-        logger.info({ subject, fromEmail, result: app.result, employer: app.employer }, "Email classified as job application");
-      } catch (err) {
-        logger.warn({ err }, "Failed to process individual email");
-      }
-    }
-
-    logger.info({ excluded, notJobRelated, aiSkipped, classified }, "Email scan filter summary");
   } finally {
     await client.logout();
   }
 
-  return { results, sinceDate: since };
+  logger.info({ total: allResults.length, mailboxes }, "Total emails classified across all mailboxes");
+  return { results: allResults, sinceDate: since };
 }
 
 export async function testConnection(
