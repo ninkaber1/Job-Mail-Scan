@@ -312,8 +312,13 @@ const JOB_SUBJECT_KEYWORDS = [
 
 type ImapSearchObject = Parameters<ImapFlow["search"]>[0];
 
-function buildSubjectOrSearch(keywords: string[], since: Date): ImapSearchObject {
-  const searches: ImapSearchObject[] = keywords.map((kw) => ({ since, subject: kw }));
+function buildSubjectOrSearch(keywords: string[]): ImapSearchObject {
+  // No `since` here — we search the entire mailbox by subject keyword.
+  // Gmail's INTERNALDATE (used by IMAP SINCE) is unreliable for All Mail:
+  // old emails get re-indexed with recent internal dates, and conversely
+  // actual recent emails can have stale internal dates. We apply date
+  // filtering ourselves after fetching envelopes.
+  const searches: ImapSearchObject[] = keywords.map((kw) => ({ subject: kw }));
   function nest(items: ImapSearchObject[]): ImapSearchObject {
     if (items.length === 1) return items[0];
     return { or: [items[0], nest(items.slice(1))] as [ImapSearchObject, ImapSearchObject] };
@@ -339,23 +344,47 @@ async function scanMailbox(
 
   logger.info({ mailbox }, "Opened mailbox for scan");
 
-  // Use server-side subject keyword search so Gmail filters on the server —
-  // this avoids the N-cap problem where emails with the right dates but
-  // ranked below the slice boundary are silently dropped.
-  const searchQuery = buildSubjectOrSearch(JOB_SUBJECT_KEYWORDS, since);
+  // Step 1: Subject keyword search across the ENTIRE mailbox (no date filter).
+  // Gmail's INTERNALDATE is unreliable in All Mail — old emails surface in
+  // recent SINCE queries and genuine recent emails can be missed. We filter
+  // by the actual Date: header ourselves after fetching envelopes.
+  const searchQuery = buildSubjectOrSearch(JOB_SUBJECT_KEYWORDS);
   const keywordUids = await client.search(searchQuery);
 
-  // Also grab the most recent maxEmails by UID (recency catch-all for emails
-  // with job content in the body but generic subjects like "Follow-up").
-  const allRecentUids = await client.search({ since });
-  const recentUids = allRecentUids.slice(-maxEmails);
+  // Step 2: Recency catch-all — most recent maxEmails UIDs for emails with
+  // job content in the body but no obvious job keyword in the subject.
+  const allUids = await client.search({ since });
+  const recentUids = allUids.slice(-maxEmails);
 
-  // Union, deduplicate
-  const uidSet = new Set([...keywordUids, ...recentUids]);
-  const messageUids = [...uidSet];
+  // Union and deduplicate
+  const combinedUids = [...new Set([...keywordUids, ...recentUids])];
+
+  if (combinedUids.length === 0) {
+    logger.info({ mailbox, since: since.toISOString() }, "No emails found");
+    return [];
+  }
+
+  // Step 3: Fetch lightweight envelopes so we can filter by actual Date: header.
+  // This is the reliable date — not Gmail's INTERNALDATE.
+  logger.info({ mailbox, keywordUids: keywordUids.length, recentFallback: recentUids.length, combined: combinedUids.length }, "Fetching envelopes to filter by date");
+
+  const uidDates: Array<{ uid: number; date: Date; fromKeyword: boolean }> = [];
+  const keywordSet = new Set(keywordUids);
+  for await (const env of client.fetch(combinedUids, { envelope: true }, { uid: true })) {
+    const date = env.envelope?.date ?? new Date(0);
+    uidDates.push({ uid: env.uid, date, fromKeyword: keywordSet.has(env.uid) });
+  }
+
+  // Keep keyword matches that are within the scan window (by Date: header),
+  // plus all recency fallback UIDs (already filtered by SINCE).
+  const filtered = uidDates.filter(
+    ({ date, fromKeyword }) => !fromKeyword || date >= since
+  );
+  filtered.sort((a, b) => b.date.getTime() - a.date.getTime());
+  const messageUids = filtered.map((e) => e.uid);
 
   if (messageUids.length === 0) {
-    logger.info({ mailbox, since: since.toISOString() }, "No emails found in date range");
+    logger.info({ mailbox, since: since.toISOString() }, "No emails in date range after envelope filter");
     return [];
   }
 
@@ -363,8 +392,10 @@ async function scanMailbox(
     mailbox,
     keywordMatches: keywordUids.length,
     recentFallback: recentUids.length,
-    total: messageUids.length,
+    afterDateFilter: messageUids.length,
     since: since.toISOString(),
+    newestInBatch: filtered[0]?.date.toISOString(),
+    oldestInBatch: filtered[filtered.length - 1]?.date.toISOString(),
   }, "Fetching email bodies for scan");
 
   const results: ParsedApplication[] = [];
