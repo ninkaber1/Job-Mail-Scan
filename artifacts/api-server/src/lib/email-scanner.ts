@@ -15,37 +15,7 @@ export interface ParsedApplication {
   sourceEmailId: string;
 }
 
-function buildImapClientPassword(
-  host: string,
-  port: number,
-  email: string,
-  password: string,
-): ImapFlow {
-  return new ImapFlow({
-    host,
-    port,
-    secure: true,
-    auth: { user: email, pass: password },
-    logger: false,
-    tls: { rejectUnauthorized: false },
-  });
-}
-
-function buildImapClientOAuth2(
-  host: string,
-  port: number,
-  email: string,
-  accessToken: string,
-): ImapFlow {
-  return new ImapFlow({
-    host,
-    port,
-    secure: true,
-    auth: { user: email, accessToken },
-    logger: false,
-    tls: { rejectUnauthorized: false },
-  });
-}
+// ─── IMAP client builders ────────────────────────────────────────────────────
 
 function buildImapClient(
   host: string,
@@ -54,13 +24,121 @@ function buildImapClient(
   credentials: { password: string } | { oauthToken: string },
 ): ImapFlow {
   if ("oauthToken" in credentials) {
-    return buildImapClientOAuth2(host, port, email, credentials.oauthToken);
+    return new ImapFlow({
+      host,
+      port,
+      secure: true,
+      auth: { user: email, accessToken: credentials.oauthToken },
+      logger: false,
+      tls: { rejectUnauthorized: false },
+    });
   }
-  return buildImapClientPassword(host, port, email, credentials.password);
+  return new ImapFlow({
+    host,
+    port,
+    secure: true,
+    auth: { user: email, pass: credentials.password },
+    logger: false,
+    tls: { rejectUnauthorized: false },
+  });
+}
+
+// ─── Email filtering ─────────────────────────────────────────────────────────
+
+/**
+ * These senders/subjects are definitively NOT job application updates.
+ * Skip them immediately without AI classification.
+ */
+function isExcluded(fromEmail: string, fromName: string, subject: string): boolean {
+  const from = fromEmail.toLowerCase();
+  const name = fromName.toLowerCase();
+  const subj = subject.toLowerCase();
+
+  // LinkedIn Job Alerts — newsletters sent by LinkedIn, not application replies
+  if (from.includes("jobalerts") || from.includes("jobs-noreply@linkedin.com")) return true;
+  if (from.includes("@linkedin.com") && name.includes("linkedin job alerts")) return true;
+  if (from.includes("@linkedin.com") && /\d+\s+new jobs/i.test(subject)) return true;
+  if (
+    from.includes("@linkedin.com") &&
+    (subj.includes("jobs for you") ||
+      subj.includes("job alert") ||
+      subj.includes("jobs you may be interested") ||
+      subj.includes("top job picks") ||
+      subj.includes("recommended jobs") ||
+      subj.includes("new jobs matching"))
+  )
+    return true;
+
+  // Generic job-board newsletter patterns
+  if (/\d+\s+new jobs near you/i.test(subject)) return true;
+  if (subj.includes("jobs matching your search")) return true;
+  if (subj.includes("job recommendations for")) return true;
+  if (subj.includes("weekly job digest")) return true;
+  if (subj.includes("daily job alert")) return true;
+
+  return false;
+}
+
+/** ATS/employer domains that always indicate a direct application update */
+const ATS_DOMAINS = [
+  "workday.com",
+  "myworkdayjobs.com",
+  "greenhouse.io",
+  "lever.co",
+  "taleo.net",
+  "icims.com",
+  "jobvite.com",
+  "smartrecruiters.com",
+  "bamboohr.com",
+  "brassring.com",
+  "successfactors.com",
+  "sapjobs.com",
+  "oracle.com",
+  "adp.com",
+  "ultipro.com",
+  "paylocity.com",
+  "dayforce.com",
+  "kforce.com",
+  "ashbyhq.com",
+  "rippling.com",
+  "eightfold.ai",
+  "dover.com",
+  "pinpointhq.com",
+  "recruitee.com",
+  "teamtailor.com",
+  "workable.com",
+];
+
+/**
+ * Some emails should always be classified regardless of keyword matching —
+ * strong signals of an active application.
+ */
+function isAlwaysInclude(fromEmail: string, subject: string): boolean {
+  const from = fromEmail.toLowerCase();
+  const subj = subject.toLowerCase();
+
+  if (ATS_DOMAINS.some((d) => from.includes(d))) return true;
+
+  if (subj.includes("interview scheduling")) return true;
+  if (subj.includes("interview invitation")) return true;
+  if (subj.includes("schedule your interview")) return true;
+  if (subj.includes("your application to ")) return true;
+  if (subj.includes("regarding your application")) return true;
+  if (subj.includes("thank you for applying")) return true;
+  if (subj.includes("we received your application")) return true;
+  if (subj.includes("application confirmation")) return true;
+  if (subj.includes("offer letter")) return true;
+  if (subj.includes("background check")) return true;
+  if (subj.includes("pre-employment")) return true;
+  if (subj.includes("start date")) return true;
+
+  return false;
 }
 
 const JOB_KEYWORDS = [
   "application",
+  "applied",
+  "apply",
   "job",
   "position",
   "role",
@@ -73,65 +151,101 @@ const JOB_KEYWORDS = [
   "cv",
   "candidate",
   "career",
-  "apply",
-  "applied",
   "screening",
   "assessment",
   "rejection",
   "rejected",
-  "congratulations",
-  "next steps",
   "background check",
   "onboarding",
-  "hr",
   "talent",
   "staffing",
-  "linkedin",
-  "indeed",
-  "glassdoor",
   "greenhouse",
   "lever",
   "workday",
+  "taleo",
+  "icims",
+  "jobvite",
+  "bamboohr",
+  "we regret",
+  "move forward",
+  "not selected",
+  "other candidates",
+  "next steps",
 ];
 
-function isJobRelated(subject: string, body: string): boolean {
-  const combined = (subject + " " + body).toLowerCase();
+function isJobRelated(fromEmail: string, subject: string, body: string): boolean {
+  // Check always-include first (overrides keyword check)
+  if (isAlwaysInclude(fromEmail, subject)) return true;
+
+  const combined = (subject + " " + body.slice(0, 1000)).toLowerCase();
   return JOB_KEYWORDS.some((kw) => combined.includes(kw));
+}
+
+// ─── AI classification ───────────────────────────────────────────────────────
+
+function stripHtml(html: string): string {
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 async function classifyEmail(
   subject: string,
   fromName: string,
   fromEmail: string,
-  body: string,
+  rawBody: string,
   date: Date,
 ): Promise<ParsedApplication | null> {
-  const prompt = `You are a job application tracker. Analyze this email and extract job application data.
+  // Use plain text; strip HTML if needed
+  const body = rawBody.startsWith("<") ? stripHtml(rawBody) : rawBody;
+
+  const prompt = `You are a precise job application tracker. Carefully read this email and decide if it represents a direct interaction with an employer or recruiter about a specific job application.
 
 Email:
 - Date: ${date.toISOString()}
 - From: ${fromName} <${fromEmail}>
 - Subject: ${subject}
-- Body: ${body.slice(0, 2000)}
+- Body:
+${body.slice(0, 4000)}
 
-Respond ONLY with a JSON object (no markdown, no extra text). If this email is NOT related to a job application, respond with exactly: {"skip": true}
+SKIP this email (respond {"skip":true}) if it is:
+- A LinkedIn Job Alert or any job recommendation newsletter
+- A job board digest, "jobs for you", "new jobs matching" etc.
+- A generic marketing or promotional email
+- An automated receipt that has no application-specific content
+- Anything NOT directly about a specific job YOU applied to
 
-If it IS job-related, respond with:
+ONLY classify if the email is clearly about a specific job application — e.g. from an employer/recruiter/ATS confirming receipt, scheduling an interview, making an offer, or rejecting an application.
+
+Respond ONLY with JSON, no markdown.
+
+If skipping: {"skip":true}
+
+If classifying:
 {
-  "position": "job title or null",
+  "position": "exact job title from email or null",
   "employer": "company name or null",
-  "contactName": "recruiter/hiring manager/interviewer name or null",
+  "contactName": "recruiter or hiring manager name if mentioned, else null",
   "methodOfContact": "email|zoom|teams|google-meet|phone|linkedin|other",
   "result": "interview|next-stage|rejected|no-response",
-  "notes": "brief summary (max 100 chars) or null"
+  "notes": "one sentence summary (max 120 chars)"
 }
 
-Rules:
-- result="interview" if they're scheduling an interview or inviting you to interview
-- result="next-stage" if you're progressing but no interview scheduled yet, or got an offer
-- result="rejected" if application was declined
-- result="no-response" if it's an acknowledgment with no clear outcome (e.g., "we received your application")
-- methodOfContact: if an interview platform (Zoom, Teams, Meet) is mentioned, use that; otherwise "email"`;
+Result rules:
+- "interview" — they are scheduling or inviting you to an interview
+- "next-stage" — you're advancing but no interview scheduled yet, or you received an offer
+- "rejected" — application was declined / "not moving forward" / "other candidates"
+- "no-response" — acknowledgment only, "we received your application", no clear outcome
+
+methodOfContact: use the platform if an interview link/invite is included (Zoom, Teams, Google Meet); otherwise "email".`;
 
   const response = await openai.chat.completions.create({
     model: "gpt-5-mini",
@@ -162,6 +276,8 @@ Rules:
   }
 }
 
+// ─── Public API ──────────────────────────────────────────────────────────────
+
 export async function scanEmails(
   host: string,
   port: number,
@@ -182,35 +298,41 @@ export async function scanEmails(
     since.setDate(since.getDate() - daysBack);
 
     const messageUids = await client.search({ since });
-    const uids = messageUids.slice(-maxEmails);
 
+    if (messageUids.length === 0) {
+      logger.info({ email }, "No emails found in date range");
+      return results;
+    }
+
+    const uids = messageUids.slice(-maxEmails);
     logger.info({ count: uids.length, email }, "Fetching emails for scan");
 
-    for await (const msg of client.fetch(
-      uids.length > 0 ? uids : ["1:*"],
-      { source: true, uid: true },
-      { uid: true },
-    )) {
+    for await (const msg of client.fetch(uids, { source: true, uid: true }, { uid: true })) {
       try {
         const parsed = await simpleParser(msg.source);
         const subject = parsed.subject ?? "";
-        const textBody =
-          typeof parsed.text === "string" ? parsed.text : (parsed.html ?? "");
         const fromAddress = parsed.from?.value[0];
         const fromEmail = fromAddress?.address ?? "";
         const fromName = fromAddress?.name ?? fromEmail;
         const date = parsed.date ?? new Date();
         const msgId = parsed.messageId ?? `uid-${msg.uid}`;
 
-        if (!isJobRelated(subject, textBody)) continue;
+        // Use plain text if available, fall back to HTML
+        const textBody =
+          typeof parsed.text === "string" && parsed.text.trim()
+            ? parsed.text
+            : parsed.html ?? "";
 
-        const app = await classifyEmail(
-          subject,
-          fromName,
-          fromEmail,
-          textBody,
-          date,
-        );
+        // Hard exclusion check first
+        if (isExcluded(fromEmail, fromName, subject)) {
+          logger.debug({ subject, fromEmail }, "Excluded email (newsletter/alert)");
+          continue;
+        }
+
+        // Keyword / always-include check
+        if (!isJobRelated(fromEmail, subject, textBody)) continue;
+
+        const app = await classifyEmail(subject, fromName, fromEmail, textBody, date);
         if (!app) continue;
 
         app.sourceEmailId = msgId;

@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { clerkClient, getAuth } from "@clerk/express";
+import { getAuth } from "@clerk/express";
 import { db, emailSessionsTable, applicationsTable } from "@workspace/db";
 import { ConnectEmailBody, ScanEmailsBody } from "@workspace/api-zod";
 import {
@@ -12,36 +12,68 @@ import { eq } from "drizzle-orm";
 
 const router: IRouter = Router();
 
-async function getClerkGoogleToken(
-  userId: string,
-): Promise<{ token: string } | { error: string; scopesMissing?: boolean }> {
-  const tokens = await clerkClient.users.getUserOauthAccessToken(
-    userId,
-    "google",
+// ─── Google OAuth token refresh ───────────────────────────────────────────────
+
+async function refreshGoogleToken(
+  refreshToken: string,
+): Promise<{ accessToken: string; expiresAt: number }> {
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: process.env.GOOGLE_CLIENT_ID ?? "",
+      client_secret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Google token refresh failed: ${body}`);
+  }
+
+  const data = await res.json();
+  return {
+    accessToken: data.access_token as string,
+    expiresAt: Date.now() + (data.expires_in as number) * 1000,
+  };
+}
+
+/** Returns a valid Google access token, refreshing it if necessary. */
+async function getValidGoogleToken(
+  session: typeof emailSessionsTable.$inferSelect,
+): Promise<string> {
+  const BUFFER_MS = 5 * 60 * 1000; // refresh 5 min before expiry
+
+  if (
+    session.googleAccessToken &&
+    session.googleTokenExpiresAt &&
+    session.googleTokenExpiresAt - Date.now() > BUFFER_MS
+  ) {
+    return session.googleAccessToken;
+  }
+
+  if (!session.googleRefreshToken) {
+    throw new Error(
+      "Gmail session expired and no refresh token is available. Please reconnect Gmail.",
+    );
+  }
+
+  const { accessToken, expiresAt } = await refreshGoogleToken(
+    session.googleRefreshToken,
   );
 
-  if (!tokens.data?.length) {
-    return {
-      error:
-        "No Google OAuth token found. Make sure you signed in with Google and try reconnecting.",
-    };
-  }
+  // Persist updated token
+  await db
+    .update(emailSessionsTable)
+    .set({ googleAccessToken: accessToken, googleTokenExpiresAt: expiresAt })
+    .where(eq(emailSessionsTable.id, session.id));
 
-  const tokenObj = tokens.data[0];
-  const scopes = tokenObj.scopes ?? [];
-
-  if (!scopes.includes("https://mail.google.com/")) {
-    return {
-      error:
-        `Gmail access not granted. Your Google sign-in doesn't include Gmail scope. ` +
-        `To fix: go to your Clerk dashboard → SSO Connections → Google → add ` +
-        `"https://mail.google.com/" to scopes, then sign out and sign back in.`,
-      scopesMissing: true,
-    };
-  }
-
-  return { token: tokenObj.token };
+  return accessToken;
 }
+
+// ─── Routes ───────────────────────────────────────────────────────────────────
 
 router.get("/email/status", async (req, res): Promise<void> => {
   const [session] = await db
@@ -85,32 +117,7 @@ router.post("/email/connect", async (req, res): Promise<void> => {
     return;
   }
 
-  let credentials: { password: string } | { oauthToken: string };
-  let authType: string;
-
-  if (!password) {
-    const { userId } = getAuth(req);
-    req.log.info({ userId: userId ?? "null", provider, email }, "Google OAuth connect attempt");
-    if (!userId) {
-      res.status(400).json({
-        error:
-          "Not authenticated. Please sign in and try again.",
-      });
-      return;
-    }
-
-    const result = await getClerkGoogleToken(userId);
-    if ("error" in result) {
-      res.status(400).json({ error: result.error });
-      return;
-    }
-
-    credentials = { oauthToken: result.token };
-    authType = "oauth_google";
-  } else {
-    credentials = { password };
-    authType = "password";
-  }
+  const credentials: { password: string } = { password: password ?? "" };
 
   try {
     await testConnection(config.host, config.port, email, credentials);
@@ -130,9 +137,8 @@ router.post("/email/connect", async (req, res): Promise<void> => {
     .values({
       provider,
       email,
-      encryptedPassword:
-        authType === "password" ? obfuscate(password as string) : "",
-      authType,
+      encryptedPassword: obfuscate(password ?? ""),
+      authType: "password",
       imapHost: imapHost ?? null,
       imapPort: imapPort != null ? String(imapPort) : null,
     })
@@ -146,12 +152,18 @@ router.post("/email/connect", async (req, res): Promise<void> => {
   });
 });
 
-router.post("/email/disconnect", async (req, res): Promise<void> => {
+router.post("/email/disconnect", async (_req, res): Promise<void> => {
   await db.delete(emailSessionsTable);
   res.json({ connected: false, email: null, provider: null, lastScanned: null });
 });
 
 router.post("/email/scan", async (req, res): Promise<void> => {
+  const { userId } = getAuth(req);
+  if (!userId) {
+    res.status(401).json({ error: "Authentication required." });
+    return;
+  }
+
   const body = ScanEmailsBody.safeParse(req.body);
   if (!body.success) {
     res.status(400).json({ error: body.error.message });
@@ -162,8 +174,7 @@ router.post("/email/scan", async (req, res): Promise<void> => {
 
   if (!session) {
     res.status(400).json({
-      error:
-        "No email connected. Please connect an email account first.",
+      error: "No email connected. Please connect an email account first.",
     });
     return;
   }
@@ -182,20 +193,14 @@ router.post("/email/scan", async (req, res): Promise<void> => {
 
   let credentials: { password: string } | { oauthToken: string };
 
-  if (session.authType === "oauth_google") {
-    const { userId } = getAuth(req);
-    if (!userId) {
-      res.status(401).json({ error: "Authentication required." });
+  if (session.authType === "oauth_google_native") {
+    try {
+      const token = await getValidGoogleToken(session);
+      credentials = { oauthToken: token };
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
       return;
     }
-
-    const result = await getClerkGoogleToken(userId);
-    if ("error" in result) {
-      res.status(400).json({ error: result.error });
-      return;
-    }
-
-    credentials = { oauthToken: result.token };
   } else {
     credentials = { password: deobfuscate(session.encryptedPassword) };
   }
@@ -220,9 +225,7 @@ router.post("/email/scan", async (req, res): Promise<void> => {
     );
   } catch (err) {
     req.log.error({ err }, "Email scan failed");
-    res
-      .status(400)
-      .json({ error: `Scan failed: ${(err as Error).message}` });
+    res.status(400).json({ error: `Scan failed: ${(err as Error).message}` });
     return;
   }
 
@@ -259,7 +262,6 @@ router.post("/email/scan", async (req, res): Promise<void> => {
     .where(eq(emailSessionsTable.id, session.id));
 
   req.log.info({ found: scanned.length, added, updated }, "Email scan complete");
-
   res.json({ found: scanned.length, added, updated });
 });
 

@@ -1,6 +1,5 @@
-import { pgTable, text, serial, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, bigint } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod/v4";
 
 export const emailSessionsTable = pgTable("email_sessions", {
   id: serial("id").primaryKey(),
@@ -8,6 +7,10 @@ export const emailSessionsTable = pgTable("email_sessions", {
   email: text("email").notNull(),
   encryptedPassword: text("encrypted_password").notNull().default(""),
   authType: text("auth_type").notNull().default("password"),
+  // Google OAuth native tokens (used when authType = 'oauth_google_native')
+  googleAccessToken: text("google_access_token"),
+  googleRefreshToken: text("google_refresh_token"),
+  googleTokenExpiresAt: bigint("google_token_expires_at", { mode: "number" }),
   imapHost: text("imap_host"),
   imapPort: text("imap_port"),
   lastScanned: timestamp("last_scanned", { withTimezone: true }),
@@ -23,6 +26,3 @@ export const emailSessionsTable = pgTable("email_sessions", {
 export const insertEmailSessionSchema = createInsertSchema(
   emailSessionsTable,
 ).omit({ id: true, createdAt: true, updatedAt: true });
-
-export type InsertEmailSession = z.infer<typeof insertEmailSessionSchema>;
-export type EmailSession = typeof emailSessionsTable.$inferSelect;
