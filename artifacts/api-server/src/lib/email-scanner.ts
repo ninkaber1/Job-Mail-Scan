@@ -348,6 +348,7 @@ async function scanMailbox(
   client: ImapFlow,
   mailbox: string,
   since: Date,
+  until: Date | null,
   maxEmails: number,
   seenIds: Set<string>,
 ): Promise<ParsedApplication[]> {
@@ -391,11 +392,13 @@ async function scanMailbox(
     uidDates.push({ uid: env.uid, date, fromKeyword: keywordSet.has(env.uid) });
   }
 
-  // Keep keyword matches that are within the scan window (by Date: header),
+  // Keep keyword matches within the scan window (by Date: header),
   // plus all recency fallback UIDs (already filtered by SINCE).
-  const filtered = uidDates.filter(
-    ({ date, fromKeyword }) => !fromKeyword || date >= since
-  );
+  // Apply optional upper bound (until) to both sets.
+  const filtered = uidDates.filter(({ date, fromKeyword }) => {
+    if (until && date > until) return false;
+    return !fromKeyword || date >= since;
+  });
   filtered.sort((a, b) => b.date.getTime() - a.date.getTime());
   const messageUids = filtered.map((e) => e.uid);
 
@@ -441,7 +444,7 @@ async function scanMailbox(
       const textBody =
         typeof parsed.text === "string" && parsed.text.trim()
           ? parsed.text
-          : parsed.html ?? "";
+          : typeof parsed.html === "string" ? parsed.html : "";
 
       if (isExcluded(fromEmail, fromName, subject)) {
         logger.info({ subject, fromEmail, date: date.toISOString() }, "Email excluded (newsletter/alert)");
@@ -484,7 +487,8 @@ export async function scanEmails(
   port: number,
   email: string,
   credentials: { password: string } | { oauthToken: string },
-  daysBack: number = 90,
+  since: Date,
+  until: Date | null = null,
   maxEmails: number = 200,
   provider: string = "gmail",
 ): Promise<{ results: ParsedApplication[]; sinceDate: Date }> {
@@ -492,9 +496,6 @@ export async function scanEmails(
   const allResults: ParsedApplication[] = [];
 
   await client.connect();
-
-  const since = new Date();
-  since.setDate(since.getDate() - daysBack);
 
   // For Gmail we scan two mailboxes:
   //   [Gmail]/All Mail  — everything except Spam/Trash
@@ -509,7 +510,7 @@ export async function scanEmails(
 
   try {
     for (const mailbox of mailboxes) {
-      const mbResults = await scanMailbox(client, mailbox, since, maxEmails, seenIds);
+      const mbResults = await scanMailbox(client, mailbox, since, until, maxEmails, seenIds);
       allResults.push(...mbResults);
     }
   } finally {

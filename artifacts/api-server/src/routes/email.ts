@@ -223,12 +223,21 @@ router.post("/email/scan", async (req, res): Promise<void> => {
     return;
   }
 
-  const daysBack = body.data.daysBack ?? 90;
   const maxEmails = body.data.maxEmails ?? 200;
   const clearPrevious = body.data.clearPrevious !== false;
 
+  // Compute since: use dateFrom if provided, otherwise fall back to daysBack
+  const since = body.data.dateFrom
+    ? new Date(body.data.dateFrom)
+    : (() => { const d = new Date(); d.setDate(d.getDate() - (body.data.daysBack ?? 90)); return d; })();
+
+  // Compute until: end of dateTo if provided, otherwise no upper bound
+  const until = body.data.dateTo
+    ? (() => { const d = new Date(body.data.dateTo!); d.setHours(23, 59, 59, 999); return d; })()
+    : null;
+
   req.log.info(
-    { daysBack, maxEmails, clearPrevious, accounts: sessions.length },
+    { since: since.toISOString(), until: until?.toISOString() ?? "now", maxEmails, clearPrevious, accounts: sessions.length },
     "Starting email scan",
   );
 
@@ -264,7 +273,7 @@ router.post("/email/scan", async (req, res): Promise<void> => {
       credentials = { password: deobfuscate(session.encryptedPassword) };
     }
 
-    req.log.info({ email: session.email, daysBack, maxEmails }, "Scanning session");
+    req.log.info({ email: session.email, since: since.toISOString(), until: until?.toISOString() ?? "now", maxEmails }, "Scanning session");
 
     let scanned: Awaited<ReturnType<typeof scanEmails>>;
     try {
@@ -273,7 +282,8 @@ router.post("/email/scan", async (req, res): Promise<void> => {
         config.port,
         session.email,
         credentials,
-        daysBack,
+        since,
+        until,
         maxEmails,
         session.provider,
       );

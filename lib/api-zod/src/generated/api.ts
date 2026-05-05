@@ -100,7 +100,21 @@ export const ScanEmailsBody = zod.object({
   daysBack: zod
     .number()
     .nullish()
-    .describe("How many days back to look (default 90)"),
+    .describe(
+      "How many days back to look (default 90). Ignored if dateFrom is provided.",
+    ),
+  dateFrom: zod
+    .string()
+    .nullish()
+    .describe(
+      "Start date for scan window (ISO date string, e.g. 2024-01-01). Overrides daysBack.",
+    ),
+  dateTo: zod
+    .string()
+    .nullish()
+    .describe(
+      "End date for scan window (ISO date string, e.g. 2024-12-31). Defaults to today.",
+    ),
   clearPrevious: zod
     .boolean()
     .nullish()

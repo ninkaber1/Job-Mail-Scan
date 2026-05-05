@@ -349,7 +349,13 @@ components:
           description: Maximum number of emails to scan (default 200)
         daysBack:
           type: ["integer", "null"]
-          description: How many days back to look (default 90)
+          description: How many days back to look (default 90). Ignored if dateFrom is provided.
+        dateFrom:
+          type: ["string", "null"]
+          description: "Start date for scan window (ISO date string, e.g. 2024-01-01). Overrides daysBack."
+        dateTo:
+          type: ["string", "null"]
+          description: "End date for scan window (ISO date string, e.g. 2024-12-31). Defaults to today."
         clearPrevious:
           type: ["boolean", "null"]
           description: If true, delete applications outside the scan window before inserting new results (default true)

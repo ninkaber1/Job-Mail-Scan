@@ -73,10 +73,20 @@ export interface ScanEmailsBody {
    */
   maxEmails?: number | null;
   /**
-   * How many days back to look (default 90)
+   * How many days back to look (default 90). Ignored if dateFrom is provided.
    * @nullable
    */
   daysBack?: number | null;
+  /**
+   * Start date for scan window (ISO date string, e.g. 2024-01-01). Overrides daysBack.
+   * @nullable
+   */
+  dateFrom?: string | null;
+  /**
+   * End date for scan window (ISO date string, e.g. 2024-12-31). Defaults to today.
+   * @nullable
+   */
+  dateTo?: string | null;
   /**
    * If true, delete applications outside the scan window before inserting new results (default true)
    * @nullable

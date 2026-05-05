@@ -73,7 +73,8 @@ const connectFormSchema = z
   );
 
 const scanFormSchema = z.object({
-  daysBack: z.coerce.number().min(1).max(365).default(90),
+  dateFrom: z.string().min(1, "Start date required"),
+  dateTo: z.string().min(1, "End date required"),
   maxEmails: z.coerce.number().min(10).max(1000).default(200),
   clearPrevious: z.boolean().default(true),
 });
@@ -113,9 +114,16 @@ export default function ConnectEmail() {
     },
   });
 
+  const defaultDateFrom = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 90);
+    return d.toISOString().split("T")[0];
+  })();
+  const defaultDateTo = new Date().toISOString().split("T")[0];
+
   const scanForm = useForm<z.infer<typeof scanFormSchema>>({
     resolver: zodResolver(scanFormSchema),
-    defaultValues: { daysBack: 90, maxEmails: 200, clearPrevious: true },
+    defaultValues: { dateFrom: defaultDateFrom, dateTo: defaultDateTo, maxEmails: 200, clearPrevious: true },
   });
 
   const watchProvider = connectForm.watch("provider");
@@ -571,17 +579,32 @@ export default function ConnectEmail() {
                 <div className="grid grid-cols-2 gap-4">
                   <FormField
                     control={scanForm.control}
-                    name="daysBack"
+                    name="dateFrom"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Days Back</FormLabel>
+                        <FormLabel>From Date</FormLabel>
                         <FormControl>
-                          <Input type="number" {...field} />
+                          <Input type="date" {...field} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
+                  <FormField
+                    control={scanForm.control}
+                    name="dateTo"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>To Date</FormLabel>
+                        <FormControl>
+                          <Input type="date" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
                   <FormField
                     control={scanForm.control}
                     name="maxEmails"
@@ -615,10 +638,9 @@ export default function ConnectEmail() {
                           Replace results from before this scan window
                         </FormLabel>
                         <p className="text-xs text-muted-foreground">
-                          When checked, applications older than{" "}
-                          {scanForm.watch("daysBack")} days are removed so the
-                          dashboard only shows what was found in this scan.
-                          Uncheck to keep older results.
+                          When checked, applications outside the selected date
+                          range are removed so the dashboard only shows what was
+                          found in this scan. Uncheck to keep older results.
                         </p>
                       </div>
                     </FormItem>
