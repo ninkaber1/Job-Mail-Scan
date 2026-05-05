@@ -3,31 +3,36 @@ import {
   text,
   serial,
   timestamp,
+  index,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
-export const applicationsTable = pgTable("applications", {
-  id: serial("id").primaryKey(),
-  userId: text("user_id"),
-  dateOfContact: text("date_of_contact").notNull(),
-  position: text("position"),
-  employer: text("employer"),
-  contactName: text("contact_name"),
-  interviewerInfo: text("interviewer_info"),
-  methodOfContact: text("method_of_contact").notNull().default("email"),
-  emailAddress: text("email_address"),
-  result: text("result").notNull().default("no-response"),
-  notes: text("notes"),
-  sourceEmailId: text("source_email_id"),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .notNull()
-    .defaultNow()
-    .$onUpdate(() => new Date()),
-});
+export const applicationsTable = pgTable(
+  "applications",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id"),
+    dateOfContact: text("date_of_contact").notNull(),
+    position: text("position"),
+    employer: text("employer"),
+    contactName: text("contact_name"),
+    interviewerInfo: text("interviewer_info"),
+    methodOfContact: text("method_of_contact").notNull().default("email"),
+    emailAddress: text("email_address"),
+    result: text("result").notNull().default("no-response"),
+    notes: text("notes"),
+    sourceEmailId: text("source_email_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [index("applications_user_id_idx").on(t.userId)],
+);
 
 export const insertApplicationSchema = createInsertSchema(
   applicationsTable,
