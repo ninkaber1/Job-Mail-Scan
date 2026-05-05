@@ -5,6 +5,7 @@ import crypto from "crypto";
 import { logger } from "../lib/logger";
 import { testConnection } from "../lib/email-scanner";
 import { getProviderConfig } from "../lib/email-providers";
+import { eq, and } from "drizzle-orm";
 
 const router: IRouter = Router();
 
@@ -185,19 +186,42 @@ router.get("/auth/google/callback", async (req, res): Promise<void> => {
 
   const expiresAt = Date.now() + tokenData.expires_in * 1000;
 
-  // Save to DB (replace any existing session)
-  await db.delete(emailSessionsTable);
-  await db.insert(emailSessionsTable).values({
-    provider: "gmail",
-    email: googleEmail,
-    encryptedPassword: "",
-    authType: "oauth_google_native",
-    googleAccessToken: tokenData.access_token,
-    googleRefreshToken: tokenData.refresh_token ?? null,
-    googleTokenExpiresAt: expiresAt,
-    imapHost: null,
-    imapPort: null,
-  });
+  // Upsert: update if this user+email combo already exists, else insert
+  const existing = await db
+    .select()
+    .from(emailSessionsTable)
+    .where(
+      and(
+        eq(emailSessionsTable.userId, stateData.userId),
+        eq(emailSessionsTable.email, googleEmail),
+      ),
+    )
+    .limit(1);
+
+  if (existing.length > 0) {
+    await db
+      .update(emailSessionsTable)
+      .set({
+        googleAccessToken: tokenData.access_token,
+        googleRefreshToken: tokenData.refresh_token ?? existing[0].googleRefreshToken,
+        googleTokenExpiresAt: expiresAt,
+        authType: "oauth_google_native",
+      })
+      .where(eq(emailSessionsTable.id, existing[0].id));
+  } else {
+    await db.insert(emailSessionsTable).values({
+      userId: stateData.userId,
+      provider: "gmail",
+      email: googleEmail,
+      encryptedPassword: "",
+      authType: "oauth_google_native",
+      googleAccessToken: tokenData.access_token,
+      googleRefreshToken: tokenData.refresh_token ?? null,
+      googleTokenExpiresAt: expiresAt,
+      imapHost: null,
+      imapPort: null,
+    });
+  }
 
   logger.info({ email: googleEmail }, "Gmail connected via Google OAuth");
   res.redirect(`${frontendBase}/connect?connected=true`);

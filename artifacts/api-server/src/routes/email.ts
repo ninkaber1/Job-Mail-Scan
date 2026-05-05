@@ -8,7 +8,7 @@ import {
   deobfuscate,
 } from "../lib/email-providers";
 import { scanEmails, testConnection, probeMailbox } from "../lib/email-scanner";
-import { eq, lt } from "drizzle-orm";
+import { eq, lt, and } from "drizzle-orm";
 
 const router: IRouter = Router();
 
@@ -44,7 +44,7 @@ async function refreshGoogleToken(
 async function getValidGoogleToken(
   session: typeof emailSessionsTable.$inferSelect,
 ): Promise<string> {
-  const BUFFER_MS = 5 * 60 * 1000; // refresh 5 min before expiry
+  const BUFFER_MS = 5 * 60 * 1000;
 
   if (
     session.googleAccessToken &&
@@ -64,7 +64,6 @@ async function getValidGoogleToken(
     session.googleRefreshToken,
   );
 
-  // Persist updated token
   await db
     .update(emailSessionsTable)
     .set({ googleAccessToken: accessToken, googleTokenExpiresAt: expiresAt })
@@ -76,31 +75,35 @@ async function getValidGoogleToken(
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 router.get("/email/status", async (req, res): Promise<void> => {
-  const [session] = await db
-    .select()
-    .from(emailSessionsTable)
-    .orderBy(emailSessionsTable.createdAt)
-    .limit(1);
-
-  if (!session) {
-    res.json({
-      connected: false,
-      email: null,
-      provider: null,
-      lastScanned: null,
-    });
+  const { userId } = getAuth(req);
+  if (!userId) {
+    res.status(401).json({ error: "Authentication required." });
     return;
   }
 
+  const sessions = await db
+    .select()
+    .from(emailSessionsTable)
+    .where(eq(emailSessionsTable.userId, userId))
+    .orderBy(emailSessionsTable.createdAt);
+
   res.json({
-    connected: true,
-    email: session.email,
-    provider: session.provider,
-    lastScanned: session.lastScanned?.toISOString() ?? null,
+    accounts: sessions.map((s) => ({
+      id: s.id,
+      email: s.email,
+      provider: s.provider,
+      lastScanned: s.lastScanned?.toISOString() ?? null,
+    })),
   });
 });
 
 router.post("/email/connect", async (req, res): Promise<void> => {
+  const { userId } = getAuth(req);
+  if (!userId) {
+    res.status(401).json({ error: "Authentication required." });
+    return;
+  }
+
   const parsed = ConnectEmailBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -130,31 +133,69 @@ router.post("/email/connect", async (req, res): Promise<void> => {
     return;
   }
 
-  await db.delete(emailSessionsTable);
+  // Upsert: update existing session for this user+email, or insert new
+  const existing = await db
+    .select()
+    .from(emailSessionsTable)
+    .where(
+      and(
+        eq(emailSessionsTable.userId, userId),
+        eq(emailSessionsTable.email, email),
+      ),
+    )
+    .limit(1);
 
-  const [session] = await db
-    .insert(emailSessionsTable)
-    .values({
+  if (existing.length > 0) {
+    await db
+      .update(emailSessionsTable)
+      .set({
+        provider,
+        encryptedPassword: obfuscate(password ?? ""),
+        authType: "password",
+        imapHost: imapHost ?? null,
+        imapPort: imapPort != null ? String(imapPort) : null,
+      })
+      .where(eq(emailSessionsTable.id, existing[0].id));
+  } else {
+    await db.insert(emailSessionsTable).values({
+      userId,
       provider,
       email,
       encryptedPassword: obfuscate(password ?? ""),
       authType: "password",
       imapHost: imapHost ?? null,
       imapPort: imapPort != null ? String(imapPort) : null,
-    })
-    .returning();
+    });
+  }
 
-  res.json({
-    connected: true,
-    email: session.email,
-    provider: session.provider,
-    lastScanned: null,
-  });
+  res.json({ connected: true, email, provider });
 });
 
-router.post("/email/disconnect", async (_req, res): Promise<void> => {
-  await db.delete(emailSessionsTable);
-  res.json({ connected: false, email: null, provider: null, lastScanned: null });
+router.post("/email/disconnect", async (req, res): Promise<void> => {
+  const { userId } = getAuth(req);
+  if (!userId) {
+    res.status(401).json({ error: "Authentication required." });
+    return;
+  }
+
+  const sessionId = req.body?.sessionId as number | undefined;
+
+  if (sessionId) {
+    await db
+      .delete(emailSessionsTable)
+      .where(
+        and(
+          eq(emailSessionsTable.userId, userId),
+          eq(emailSessionsTable.id, sessionId),
+        ),
+      );
+  } else {
+    await db
+      .delete(emailSessionsTable)
+      .where(eq(emailSessionsTable.userId, userId));
+  }
+
+  res.json({ success: true });
 });
 
 router.post("/email/scan", async (req, res): Promise<void> => {
@@ -170,12 +211,161 @@ router.post("/email/scan", async (req, res): Promise<void> => {
     return;
   }
 
-  const [session] = await db.select().from(emailSessionsTable).limit(1);
+  const sessions = await db
+    .select()
+    .from(emailSessionsTable)
+    .where(eq(emailSessionsTable.userId, userId));
 
-  if (!session) {
+  if (sessions.length === 0) {
     res.status(400).json({
       error: "No email connected. Please connect an email account first.",
     });
+    return;
+  }
+
+  const daysBack = body.data.daysBack ?? 90;
+  const maxEmails = body.data.maxEmails ?? 200;
+  const clearPrevious = body.data.clearPrevious !== false;
+
+  req.log.info(
+    { daysBack, maxEmails, clearPrevious, accounts: sessions.length },
+    "Starting email scan",
+  );
+
+  let totalFound = 0;
+  let totalAdded = 0;
+  let totalUpdated = 0;
+  let totalDeleted = 0;
+
+  for (const session of sessions) {
+    let config;
+    try {
+      config = getProviderConfig(
+        session.provider,
+        session.imapHost,
+        session.imapPort ? parseInt(session.imapPort, 10) : null,
+      );
+    } catch (err) {
+      req.log.warn({ err, email: session.email }, "Skipping session with invalid provider config");
+      continue;
+    }
+
+    let credentials: { password: string } | { oauthToken: string };
+
+    if (session.authType === "oauth_google_native") {
+      try {
+        const token = await getValidGoogleToken(session);
+        credentials = { oauthToken: token };
+      } catch (err) {
+        req.log.warn({ err, email: session.email }, "Skipping session: OAuth token refresh failed");
+        continue;
+      }
+    } else {
+      credentials = { password: deobfuscate(session.encryptedPassword) };
+    }
+
+    req.log.info({ email: session.email, daysBack, maxEmails }, "Scanning session");
+
+    let scanned: Awaited<ReturnType<typeof scanEmails>>;
+    try {
+      scanned = await scanEmails(
+        config.host,
+        config.port,
+        session.email,
+        credentials,
+        daysBack,
+        maxEmails,
+        session.provider,
+      );
+    } catch (err) {
+      req.log.error({ err, email: session.email }, "Email scan failed for session");
+      continue;
+    }
+
+    if (clearPrevious) {
+      const sinceStr = scanned.sinceDate.toISOString().split("T")[0];
+      const deleted = await db
+        .delete(applicationsTable)
+        .where(
+          and(
+            eq(applicationsTable.userId, userId),
+            lt(applicationsTable.dateOfContact, sinceStr),
+          ),
+        )
+        .returning({ id: applicationsTable.id });
+      totalDeleted += deleted.length;
+      req.log.info(
+        { deleted: deleted.length, since: sinceStr, email: session.email },
+        "Cleared applications outside scan window",
+      );
+    }
+
+    let added = 0;
+    let updated = 0;
+
+    for (const app of scanned.results) {
+      const existing = await db
+        .select()
+        .from(applicationsTable)
+        .where(
+          and(
+            eq(applicationsTable.userId, userId),
+            eq(applicationsTable.sourceEmailId, app.sourceEmailId),
+          ),
+        )
+        .limit(1);
+
+      if (existing.length > 0) {
+        await db
+          .update(applicationsTable)
+          .set({
+            result: app.result,
+            notes: app.notes,
+            contactName: app.contactName,
+            interviewerInfo: app.interviewerInfo,
+            methodOfContact: app.methodOfContact,
+          })
+          .where(eq(applicationsTable.id, existing[0].id));
+        updated++;
+      } else {
+        await db.insert(applicationsTable).values({ ...app, userId });
+        added++;
+      }
+    }
+
+    await db
+      .update(emailSessionsTable)
+      .set({ lastScanned: new Date() })
+      .where(eq(emailSessionsTable.id, session.id));
+
+    totalFound += scanned.results.length;
+    totalAdded += added;
+    totalUpdated += updated;
+  }
+
+  req.log.info(
+    { totalFound, totalAdded, totalUpdated, totalDeleted },
+    "Email scan complete",
+  );
+  res.json({ found: totalFound, added: totalAdded, updated: totalUpdated });
+});
+
+// ─── Diagnostic probe (dev only) ──────────────────────────────────────────────
+router.post("/email/probe", async (req, res): Promise<void> => {
+  const { userId } = getAuth(req);
+  if (!userId) {
+    res.status(401).json({ error: "Authentication required." });
+    return;
+  }
+
+  const [session] = await db
+    .select()
+    .from(emailSessionsTable)
+    .where(eq(emailSessionsTable.userId, userId))
+    .limit(1);
+
+  if (!session) {
+    res.status(400).json({ error: "No email session" });
     return;
   }
 
@@ -191,114 +381,19 @@ router.post("/email/scan", async (req, res): Promise<void> => {
     return;
   }
 
-  let credentials: { password: string } | { oauthToken: string };
+  const credentials = { password: deobfuscate(session.encryptedPassword) };
+  const mailbox = (req.body.mailbox as string | undefined) ?? "[Gmail]/All Mail";
+  const keyword = (req.body.keyword as string | undefined) ?? "interview";
 
-  if (session.authType === "oauth_google_native") {
-    try {
-      const token = await getValidGoogleToken(session);
-      credentials = { oauthToken: token };
-    } catch (err) {
-      res.status(400).json({ error: (err as Error).message });
-      return;
-    }
-  } else {
-    credentials = { password: deobfuscate(session.encryptedPassword) };
-  }
-
-  const daysBack = body.data.daysBack ?? 90;
-  const maxEmails = body.data.maxEmails ?? 200;
-  // Default: clear entries outside the scan window so the dashboard reflects reality
-  const clearPrevious = body.data.clearPrevious !== false;
-
-  req.log.info(
-    { email: session.email, daysBack, maxEmails, clearPrevious, authType: session.authType },
-    "Starting email scan",
-  );
-
-  let scanned: Awaited<ReturnType<typeof scanEmails>>;
   try {
-    scanned = await scanEmails(
+    const result = await probeMailbox(
       config.host,
       config.port,
       session.email,
       credentials,
-      daysBack,
-      maxEmails,
-      session.provider,
+      mailbox,
+      keyword,
     );
-  } catch (err) {
-    req.log.error({ err }, "Email scan failed");
-    res.status(400).json({ error: `Scan failed: ${(err as Error).message}` });
-    return;
-  }
-
-  // Optionally remove applications that fall outside the scan window
-  let deleted = 0;
-  if (clearPrevious) {
-    const sinceStr = scanned.sinceDate.toISOString().split("T")[0];
-    const result = await db
-      .delete(applicationsTable)
-      .where(lt(applicationsTable.dateOfContact, sinceStr))
-      .returning({ id: applicationsTable.id });
-    deleted = result.length;
-    req.log.info({ deleted, since: sinceStr }, "Cleared applications outside scan window");
-  }
-
-  let added = 0;
-  let updated = 0;
-
-  for (const app of scanned.results) {
-    const existing = await db
-      .select()
-      .from(applicationsTable)
-      .where(eq(applicationsTable.sourceEmailId, app.sourceEmailId))
-      .limit(1);
-
-    if (existing.length > 0) {
-      await db
-        .update(applicationsTable)
-        .set({
-          result: app.result,
-          notes: app.notes,
-          contactName: app.contactName,
-          methodOfContact: app.methodOfContact,
-        })
-        .where(eq(applicationsTable.id, existing[0].id));
-      updated++;
-    } else {
-      await db.insert(applicationsTable).values(app);
-      added++;
-    }
-  }
-
-  await db
-    .update(emailSessionsTable)
-    .set({ lastScanned: new Date() })
-    .where(eq(emailSessionsTable.id, session.id));
-
-  req.log.info({ found: scanned.results.length, added, updated, deleted }, "Email scan complete");
-  res.json({ found: scanned.results.length, added, updated });
-});
-
-// ─── Diagnostic probe (dev only) ──────────────────────────────────────────────
-router.post("/email/probe", async (req, res): Promise<void> => {
-  const [session] = await db.select().from(emailSessionsTable).limit(1);
-  if (!session) {
-    res.status(400).json({ error: "No email session" });
-    return;
-  }
-  let config;
-  try {
-    config = getProviderConfig(session.provider, session.imapHost, session.imapPort ? parseInt(session.imapPort, 10) : null);
-  } catch (err) {
-    res.status(400).json({ error: (err as Error).message });
-    return;
-  }
-  const credentials = { password: deobfuscate(session.encryptedPassword) };
-  const mailbox = (req.body.mailbox as string | undefined) ?? "[Gmail]/All Mail";
-  const keyword = (req.body.keyword as string | undefined) ?? "interview";
-  try {
-    const result = await probeMailbox(config.host, config.port, session.email, credentials, mailbox, keyword);
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });

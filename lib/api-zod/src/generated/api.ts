@@ -44,9 +44,9 @@ export const ConnectEmailBody = zod.object({
 });
 
 export const ConnectEmailResponse = zod.object({
-  connected: zod.boolean(),
-  email: zod.string().nullable(),
-  provider: zod.string().nullable(),
+  id: zod.number(),
+  email: zod.string(),
+  provider: zod.string(),
   lastScanned: zod
     .string()
     .nullable()
@@ -54,31 +54,38 @@ export const ConnectEmailResponse = zod.object({
 });
 
 /**
- * Returns current email connection status
- * @summary Get email connection status
+ * Returns all connected email accounts for the current user
+ * @summary Get connected email accounts
  */
 export const GetEmailStatusResponse = zod.object({
-  connected: zod.boolean(),
-  email: zod.string().nullable(),
-  provider: zod.string().nullable(),
-  lastScanned: zod
-    .string()
-    .nullable()
-    .describe("ISO 8601 timestamp of last scan"),
+  accounts: zod.array(
+    zod.object({
+      id: zod.number(),
+      email: zod.string(),
+      provider: zod.string(),
+      lastScanned: zod
+        .string()
+        .nullable()
+        .describe("ISO 8601 timestamp of last scan"),
+    }),
+  ),
 });
 
 /**
- * Disconnect from the current email provider
- * @summary Disconnect email
+ * Disconnect a specific email account by sessionId, or all accounts if omitted
+ * @summary Disconnect an email account
  */
+export const DisconnectEmailBody = zod.object({
+  sessionId: zod
+    .number()
+    .nullish()
+    .describe(
+      "ID of the specific session to disconnect. If omitted, all accounts are disconnected.",
+    ),
+});
+
 export const DisconnectEmailResponse = zod.object({
-  connected: zod.boolean(),
-  email: zod.string().nullable(),
-  provider: zod.string().nullable(),
-  lastScanned: zod
-    .string()
-    .nullable()
-    .describe("ISO 8601 timestamp of last scan"),
+  success: zod.boolean(),
 });
 
 /**
@@ -131,7 +138,11 @@ export const ListApplicationsResponseItem = zod.object({
   contactName: zod
     .string()
     .nullable()
-    .describe("Name of recruiter, hiring manager, or interviewer"),
+    .describe("Name of recruiter or hiring manager"),
+  interviewerInfo: zod
+    .string()
+    .nullish()
+    .describe("For interview emails: interviewer name(s) and title(s)"),
   methodOfContact: zod
     .string()
     .describe("email, zoom, teams, google-meet, phone, linkedin, other"),
@@ -156,6 +167,7 @@ export const CreateApplicationBody = zod.object({
   position: zod.string().nullish(),
   employer: zod.string().nullish(),
   contactName: zod.string().nullish(),
+  interviewerInfo: zod.string().nullish(),
   methodOfContact: zod.string(),
   emailAddress: zod.string().nullish(),
   result: zod.string(),
@@ -183,7 +195,11 @@ export const GetApplicationsSummaryResponse = zod.object({
       contactName: zod
         .string()
         .nullable()
-        .describe("Name of recruiter, hiring manager, or interviewer"),
+        .describe("Name of recruiter or hiring manager"),
+      interviewerInfo: zod
+        .string()
+        .nullish()
+        .describe("For interview emails: interviewer name(s) and title(s)"),
       methodOfContact: zod
         .string()
         .describe("email, zoom, teams, google-meet, phone, linkedin, other"),
@@ -218,7 +234,11 @@ export const GetApplicationResponse = zod.object({
   contactName: zod
     .string()
     .nullable()
-    .describe("Name of recruiter, hiring manager, or interviewer"),
+    .describe("Name of recruiter or hiring manager"),
+  interviewerInfo: zod
+    .string()
+    .nullish()
+    .describe("For interview emails: interviewer name(s) and title(s)"),
   methodOfContact: zod
     .string()
     .describe("email, zoom, teams, google-meet, phone, linkedin, other"),
@@ -246,6 +266,7 @@ export const UpdateApplicationBody = zod.object({
   position: zod.string().nullish(),
   employer: zod.string().nullish(),
   contactName: zod.string().nullish(),
+  interviewerInfo: zod.string().nullish(),
   methodOfContact: zod.string().optional(),
   emailAddress: zod.string().nullish(),
   result: zod.string().optional(),
@@ -260,7 +281,11 @@ export const UpdateApplicationResponse = zod.object({
   contactName: zod
     .string()
     .nullable()
-    .describe("Name of recruiter, hiring manager, or interviewer"),
+    .describe("Name of recruiter or hiring manager"),
+  interviewerInfo: zod
+    .string()
+    .nullish()
+    .describe("For interview emails: interviewer name(s) and title(s)"),
   methodOfContact: zod
     .string()
     .describe("email, zoom, teams, google-meet, phone, linkedin, other"),

@@ -20,7 +20,7 @@ export default function Dashboard() {
         </p>
       </div>
 
-      {!isLoadingEmail && emailStatus && !emailStatus.connected && (
+      {!isLoadingEmail && emailStatus && emailStatus.accounts.length === 0 && (
         <Card className="bg-primary/5 border-primary/20">
           <CardContent className="p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
             <div>
@@ -132,9 +132,10 @@ export default function Dashboard() {
                         ${app.result === 'interview' ? 'bg-green-50 text-green-700 border-green-200' : ''}
                         ${app.result === 'next-stage' ? 'bg-blue-50 text-blue-700 border-blue-200' : ''}
                         ${app.result === 'rejected' ? 'bg-red-50 text-red-700 border-red-200' : ''}
+                        ${app.result === 'applied' ? 'bg-purple-50 text-purple-700 border-purple-200' : ''}
                         ${app.result === 'no-response' ? 'bg-gray-100 text-gray-700 border-gray-200' : ''}
                       `}>
-                        {app.result.replace('-', ' ').toUpperCase()}
+                        {app.result.replace(/-/g, ' ').toUpperCase()}
                       </Badge>
                     </div>
                   </div>

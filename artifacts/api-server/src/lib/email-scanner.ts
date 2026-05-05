@@ -8,6 +8,7 @@ export interface ParsedApplication {
   position: string | null;
   employer: string | null;
   contactName: string | null;
+  interviewerInfo: string | null;
   methodOfContact: string;
   emailAddress: string | null;
   result: string;
@@ -247,8 +248,9 @@ If classifying:
   "position": "exact job title from email or null",
   "employer": "company name or null",
   "contactName": "recruiter or hiring manager name if mentioned, else null",
+  "interviewerInfo": "for interview emails: the interviewer name(s) and title(s) listed in the email separated by semicolons (e.g. 'Jane Smith, Senior Engineer; Bob Jones, VP Engineering'); if no specific interviewers are listed, use the sender's name; null for non-interview emails",
   "methodOfContact": "email|zoom|teams|google-meet|phone|linkedin|other",
-  "result": "interview|next-stage|rejected|no-response",
+  "result": "interview|next-stage|rejected|applied|no-response",
   "notes": "one sentence summary (max 120 chars)"
 }
 
@@ -256,7 +258,8 @@ Result rules:
 - "interview" — they are scheduling or inviting you to an interview
 - "next-stage" — you're advancing but no interview scheduled yet, or you received an offer
 - "rejected" — application was declined / "not moving forward" / "other candidates"
-- "no-response" — acknowledgment only, "we received your application", no clear outcome
+- "applied" — application receipt confirmation only: "thank you for applying", "we received your application", "your application has been submitted" — no outcome yet
+- "no-response" — job-related but none of the above categories fit
 
 methodOfContact: use the platform if an interview link/invite is included (Zoom, Teams, Google Meet); otherwise "email".`;
 
@@ -272,15 +275,28 @@ methodOfContact: use the platform if an interview link/invite is included (Zoom,
     const parsed = JSON.parse(content.trim());
     if (parsed.skip) return null;
 
+    const nullify = (v: unknown): string | null => {
+      if (v === null || v === undefined || v === "null" || v === "") return null;
+      return String(v);
+    };
+
+    const result = parsed.result ?? "no-response";
+    // For interview emails: use AI-extracted interviewer info, falling back to the sender's name
+    const interviewerInfo =
+      result === "interview"
+        ? (nullify(parsed.interviewerInfo) ?? fromName)
+        : nullify(parsed.interviewerInfo);
+
     return {
       dateOfContact: date.toISOString().split("T")[0],
-      position: parsed.position ?? null,
-      employer: parsed.employer ?? null,
-      contactName: parsed.contactName ?? null,
+      position: nullify(parsed.position),
+      employer: nullify(parsed.employer),
+      contactName: nullify(parsed.contactName),
+      interviewerInfo,
       methodOfContact: parsed.methodOfContact ?? "email",
       emailAddress: fromEmail,
-      result: parsed.result ?? "no-response",
-      notes: parsed.notes ?? null,
+      result,
+      notes: nullify(parsed.notes),
       sourceEmailId: "",
     };
   } catch {

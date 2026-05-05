@@ -9,10 +9,12 @@ import { z } from "zod/v4";
 
 export const applicationsTable = pgTable("applications", {
   id: serial("id").primaryKey(),
+  userId: text("user_id"),
   dateOfContact: text("date_of_contact").notNull(),
   position: text("position"),
   employer: text("employer"),
   contactName: text("contact_name"),
+  interviewerInfo: text("interviewer_info"),
   methodOfContact: text("method_of_contact").notNull().default("email"),
   emailAddress: text("email_address"),
   result: text("result").notNull().default("no-response"),

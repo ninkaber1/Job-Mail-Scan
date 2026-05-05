@@ -39,17 +39,31 @@ export interface ConnectEmailBody {
   imapPort?: number | null;
 }
 
-export interface EmailConnectionStatus {
-  connected: boolean;
-  /** @nullable */
-  email: string | null;
-  /** @nullable */
-  provider: string | null;
+export interface EmailAccountItem {
+  id: number;
+  email: string;
+  provider: string;
   /**
    * ISO 8601 timestamp of last scan
    * @nullable
    */
   lastScanned: string | null;
+}
+
+export interface EmailStatusResponse {
+  accounts: EmailAccountItem[];
+}
+
+export interface DisconnectEmailBody {
+  /**
+   * ID of the specific session to disconnect. If omitted, all accounts are disconnected.
+   * @nullable
+   */
+  sessionId?: number | null;
+}
+
+export interface DisconnectResponse {
+  success: boolean;
 }
 
 export interface ScanEmailsBody {
@@ -93,10 +107,15 @@ export interface Application {
   /** @nullable */
   employer: string | null;
   /**
-   * Name of recruiter, hiring manager, or interviewer
+   * Name of recruiter or hiring manager
    * @nullable
    */
   contactName: string | null;
+  /**
+   * For interview emails: interviewer name(s) and title(s)
+   * @nullable
+   */
+  interviewerInfo?: string | null;
   /** email, zoom, teams, google-meet, phone, linkedin, other */
   methodOfContact: string;
   /** @nullable */
@@ -122,6 +141,8 @@ export interface CreateApplicationBody {
   employer?: string | null;
   /** @nullable */
   contactName?: string | null;
+  /** @nullable */
+  interviewerInfo?: string | null;
   methodOfContact: string;
   /** @nullable */
   emailAddress?: string | null;
@@ -138,6 +159,8 @@ export interface UpdateApplicationBody {
   employer?: string | null;
   /** @nullable */
   contactName?: string | null;
+  /** @nullable */
+  interviewerInfo?: string | null;
   methodOfContact?: string;
   /** @nullable */
   emailAddress?: string | null;

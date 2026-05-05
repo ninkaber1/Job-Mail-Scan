@@ -180,6 +180,7 @@ export default function ApplicationForm() {
                         <SelectItem value="interview">Interview</SelectItem>
                         <SelectItem value="next-stage">Next Stage</SelectItem>
                         <SelectItem value="rejected">Rejected</SelectItem>
+                        <SelectItem value="applied">Applied</SelectItem>
                         <SelectItem value="no-response">No Response</SelectItem>
                       </SelectContent>
                     </Select>

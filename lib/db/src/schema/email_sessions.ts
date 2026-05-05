@@ -3,6 +3,7 @@ import { createInsertSchema } from "drizzle-zod";
 
 export const emailSessionsTable = pgTable("email_sessions", {
   id: serial("id").primaryKey(),
+  userId: text("user_id"),
   provider: text("provider").notNull(),
   email: text("email").notNull(),
   encryptedPassword: text("encrypted_password").notNull().default(""),

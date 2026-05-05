@@ -133,6 +133,7 @@ export default function ApplicationsList() {
               <SelectItem value="interview">Interview</SelectItem>
               <SelectItem value="next-stage">Next Stage</SelectItem>
               <SelectItem value="rejected">Rejected</SelectItem>
+              <SelectItem value="applied">Applied</SelectItem>
               <SelectItem value="no-response">No Response</SelectItem>
             </SelectContent>
           </Select>
@@ -188,8 +189,14 @@ export default function ApplicationsList() {
                     </div>
                   </TableCell>
                   <TableCell>
-                    {app.contactName && <div className="font-medium">{app.contactName}</div>}
-                    {app.emailAddress && <div className="text-sm text-muted-foreground flex items-center gap-1"><Mail className="w-3 h-3"/>{app.emailAddress}</div>}
+                    {app.emailAddress ? (
+                      <div className="text-sm flex items-center gap-1 text-muted-foreground">
+                        <Mail className="w-3 h-3 shrink-0" />
+                        {app.emailAddress}
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground/40 text-sm">—</span>
+                    )}
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2 capitalize text-muted-foreground">
@@ -202,9 +209,10 @@ export default function ApplicationsList() {
                         ${app.result === 'interview' ? 'bg-green-50 text-green-700 border-green-200' : ''}
                         ${app.result === 'next-stage' ? 'bg-blue-50 text-blue-700 border-blue-200' : ''}
                         ${app.result === 'rejected' ? 'bg-red-50 text-red-700 border-red-200' : ''}
+                        ${app.result === 'applied' ? 'bg-purple-50 text-purple-700 border-purple-200' : ''}
                         ${app.result === 'no-response' ? 'bg-gray-100 text-gray-700 border-gray-200' : ''}
                       `}>
-                      {app.result.replace('-', ' ').toUpperCase()}
+                      {app.result.replace(/-/g, ' ').toUpperCase()}
                     </Badge>
                   </TableCell>
                   <TableCell>

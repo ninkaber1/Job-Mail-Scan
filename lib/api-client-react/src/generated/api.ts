@@ -21,7 +21,10 @@ import type {
   ApplicationsSummary,
   ConnectEmailBody,
   CreateApplicationBody,
-  EmailConnectionStatus,
+  DisconnectEmailBody,
+  DisconnectResponse,
+  EmailAccountItem,
+  EmailStatusResponse,
   ErrorResponse,
   HealthStatus,
   ListApplicationsParams,
@@ -126,8 +129,8 @@ export const getConnectEmailUrl = () => {
 export const connectEmail = async (
   connectEmailBody: ConnectEmailBody,
   options?: RequestInit,
-): Promise<EmailConnectionStatus> => {
-  return customFetch<EmailConnectionStatus>(getConnectEmailUrl(), {
+): Promise<EmailAccountItem> => {
+  return customFetch<EmailAccountItem>(getConnectEmailUrl(), {
     ...options,
     method: "POST",
     headers: { "Content-Type": "application/json", ...options?.headers },
@@ -203,8 +206,8 @@ export const useConnectEmail = <
 };
 
 /**
- * Returns current email connection status
- * @summary Get email connection status
+ * Returns all connected email accounts for the current user
+ * @summary Get connected email accounts
  */
 export const getGetEmailStatusUrl = () => {
   return `/api/email/status`;
@@ -212,8 +215,8 @@ export const getGetEmailStatusUrl = () => {
 
 export const getEmailStatus = async (
   options?: RequestInit,
-): Promise<EmailConnectionStatus> => {
-  return customFetch<EmailConnectionStatus>(getGetEmailStatusUrl(), {
+): Promise<EmailStatusResponse> => {
+  return customFetch<EmailStatusResponse>(getGetEmailStatusUrl(), {
     ...options,
     method: "GET",
   });
@@ -255,7 +258,7 @@ export type GetEmailStatusQueryResult = NonNullable<
 export type GetEmailStatusQueryError = ErrorType<unknown>;
 
 /**
- * @summary Get email connection status
+ * @summary Get connected email accounts
  */
 
 export function useGetEmailStatus<
@@ -279,19 +282,22 @@ export function useGetEmailStatus<
 }
 
 /**
- * Disconnect from the current email provider
- * @summary Disconnect email
+ * Disconnect a specific email account by sessionId, or all accounts if omitted
+ * @summary Disconnect an email account
  */
 export const getDisconnectEmailUrl = () => {
   return `/api/email/disconnect`;
 };
 
 export const disconnectEmail = async (
+  disconnectEmailBody?: DisconnectEmailBody,
   options?: RequestInit,
-): Promise<EmailConnectionStatus> => {
-  return customFetch<EmailConnectionStatus>(getDisconnectEmailUrl(), {
+): Promise<DisconnectResponse> => {
+  return customFetch<DisconnectResponse>(getDisconnectEmailUrl(), {
     ...options,
     method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(disconnectEmailBody),
   });
 };
 
@@ -302,14 +308,14 @@ export const getDisconnectEmailMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof disconnectEmail>>,
     TError,
-    void,
+    { data: BodyType<DisconnectEmailBody> },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof disconnectEmail>>,
   TError,
-  void,
+  { data: BodyType<DisconnectEmailBody> },
   TContext
 > => {
   const mutationKey = ["disconnectEmail"];
@@ -323,9 +329,11 @@ export const getDisconnectEmailMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof disconnectEmail>>,
-    void
-  > = () => {
-    return disconnectEmail(requestOptions);
+    { data: BodyType<DisconnectEmailBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return disconnectEmail(data, requestOptions);
   };
 
   return { mutationFn, ...mutationOptions };
@@ -334,11 +342,11 @@ export const getDisconnectEmailMutationOptions = <
 export type DisconnectEmailMutationResult = NonNullable<
   Awaited<ReturnType<typeof disconnectEmail>>
 >;
-
+export type DisconnectEmailMutationBody = BodyType<DisconnectEmailBody>;
 export type DisconnectEmailMutationError = ErrorType<unknown>;
 
 /**
- * @summary Disconnect email
+ * @summary Disconnect an email account
  */
 export const useDisconnectEmail = <
   TError = ErrorType<unknown>,
@@ -347,14 +355,14 @@ export const useDisconnectEmail = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof disconnectEmail>>,
     TError,
-    void,
+    { data: BodyType<DisconnectEmailBody> },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationResult<
   Awaited<ReturnType<typeof disconnectEmail>>,
   TError,
-  void,
+  { data: BodyType<DisconnectEmailBody> },
   TContext
 > => {
   return useMutation(getDisconnectEmailMutationOptions(options));
