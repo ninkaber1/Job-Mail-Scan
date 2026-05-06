@@ -409,6 +409,9 @@ components:
           description: "interview, next-stage, rejected, no-response"
         notes:
           type: ["string", "null"]
+        comment:
+          type: ["string", "null"]
+          description: Free-text user comment on this application
         sourceEmailId:
           type: ["string", "null"]
           description: Original email message ID for deduplication
@@ -451,6 +454,8 @@ components:
           type: string
         notes:
           type: ["string", "null"]
+        comment:
+          type: ["string", "null"]
       required:
         - dateOfContact
         - methodOfContact
@@ -476,6 +481,8 @@ components:
         result:
           type: string
         notes:
+          type: ["string", "null"]
+        comment:
           type: ["string", "null"]
 
     ApplicationsSummary:

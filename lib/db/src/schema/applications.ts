@@ -22,6 +22,7 @@ export const applicationsTable = pgTable(
     emailAddress: text("email_address"),
     result: text("result").notNull().default("no-response"),
     notes: text("notes"),
+    comment: text("comment"),
     sourceEmailId: text("source_email_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

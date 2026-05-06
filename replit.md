@@ -50,9 +50,9 @@ artifacts/job-tracker/src/pages/  — connect.tsx, applications.tsx, dashboard.t
 - Connect multiple Gmail/Outlook/Yahoo/iCloud/custom IMAP accounts per user
 - Gmail OAuth (no app password needed) or IMAP app password
 - AI-powered inbox scan: extracts employer, position, contact, interviewer, method, result, notes
-- Applications table: search, filter by status, export CSV, inline edit/delete
+- Applications table: search, filter by status, export CSV, always-visible edit/delete buttons, inline-editable Comment column
 - Dashboard: total / interviews / next-stage / rejected / no-response stats + recent activity
-- Manual application entry form
+- Manual application entry form (includes Comment + AI Notes fields)
 
 ## User preferences
 
@@ -60,6 +60,8 @@ artifacts/job-tracker/src/pages/  — connect.tsx, applications.tsx, dashboard.t
 - Name & Title (interviewerInfo) column hidden from table; still stored and populated by AI
 - "Applied" is a distinct status (application receipt confirmation)
 - AI extracts interviewer name/title; falls back to sender name for interview emails
+- `comment` column is user-editable free text (separate from AI-generated `notes`); click-to-edit inline in the table
+- Mobile nav Sheet closes automatically when a nav link is tapped
 
 ## Gotchas
 

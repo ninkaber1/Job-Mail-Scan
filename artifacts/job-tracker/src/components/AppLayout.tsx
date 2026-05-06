@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useClerk, useUser } from "@clerk/react";
 import { 
@@ -6,7 +7,6 @@ import {
   BriefcaseBusiness,
   Menu,
   LogOut,
-  User
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -16,6 +16,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const { signOut } = useClerk();
   const { user } = useUser();
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   const navigation = [
     { name: "Dashboard", href: "/", icon: LayoutDashboard },
@@ -26,12 +27,12 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const initials = user?.firstName?.[0] ?? user?.emailAddresses?.[0]?.emailAddress?.[0]?.toUpperCase() ?? "U";
   const displayName = user?.firstName ? `${user.firstName}${user.lastName ? ` ${user.lastName}` : ""}` : user?.emailAddresses?.[0]?.emailAddress ?? "";
 
-  const NavLinks = () => (
+  const NavLinks = ({ onSelect }: { onSelect?: () => void }) => (
     <>
       {navigation.map((item) => {
         const isActive = location === item.href || (item.href !== "/" && location.startsWith(item.href));
         return (
-          <Link key={item.name} href={item.href} className="w-full" data-testid={`nav-${item.name.toLowerCase().replace(' ', '-')}`}>
+          <Link key={item.name} href={item.href} className="w-full" data-testid={`nav-${item.name.toLowerCase().replace(' ', '-')}`} onClick={onSelect}>
             <Button
               variant={isActive ? "secondary" : "ghost"}
               className="w-full justify-start gap-3 h-10"
@@ -83,7 +84,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               {initials}
             </AvatarFallback>
           </Avatar>
-          <Sheet>
+          <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
             <SheetTrigger asChild>
               <Button variant="ghost" size="icon" data-testid="btn-mobile-menu">
                 <Menu className="w-5 h-5" />
@@ -97,7 +98,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 </div>
               </div>
               <nav className="p-4 flex flex-col gap-2 flex-1">
-                <NavLinks />
+                <NavLinks onSelect={() => setMobileOpen(false)} />
               </nav>
               <UserFooter />
             </SheetContent>

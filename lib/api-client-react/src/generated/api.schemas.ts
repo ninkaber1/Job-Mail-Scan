@@ -135,6 +135,11 @@ export interface Application {
   /** @nullable */
   notes: string | null;
   /**
+   * Free-text user comment on this application
+   * @nullable
+   */
+  comment?: string | null;
+  /**
    * Original email message ID for deduplication
    * @nullable
    */
@@ -159,6 +164,8 @@ export interface CreateApplicationBody {
   result: string;
   /** @nullable */
   notes?: string | null;
+  /** @nullable */
+  comment?: string | null;
 }
 
 export interface UpdateApplicationBody {
@@ -177,6 +184,8 @@ export interface UpdateApplicationBody {
   result?: string;
   /** @nullable */
   notes?: string | null;
+  /** @nullable */
+  comment?: string | null;
 }
 
 export type ApplicationsSummaryByResult = {

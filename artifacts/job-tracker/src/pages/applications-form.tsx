@@ -32,6 +32,7 @@ const formSchema = z.object({
   emailAddress: z.string().email("Invalid email").nullable().optional().or(z.literal("")),
   result: z.string().min(1, "Status is required"),
   notes: z.string().nullable().optional(),
+  comment: z.string().nullable().optional(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -66,6 +67,7 @@ export default function ApplicationForm() {
       emailAddress: "",
       result: "no-response",
       notes: "",
+      comment: "",
     }
   });
 
@@ -80,6 +82,7 @@ export default function ApplicationForm() {
         emailAddress: application.emailAddress || "",
         result: application.result,
         notes: application.notes || "",
+        comment: application.comment || "",
       });
     }
   }, [application, isEditing, form]);
@@ -93,6 +96,7 @@ export default function ApplicationForm() {
       contactName: data.contactName || null,
       emailAddress: data.emailAddress || null,
       notes: data.notes || null,
+      comment: data.comment || null,
     };
 
     if (isEditing) {
@@ -229,14 +233,28 @@ export default function ApplicationForm() {
                 </div>
               </div>
 
-              <div className="border-t border-border pt-6">
+              <div className="border-t border-border pt-6 space-y-6">
+                <FormField control={form.control} name="comment" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Comment</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder="Your personal notes or comments about this application..."
+                        className="min-h-[80px]"
+                        {...field}
+                        value={field.value || ''}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
                 <FormField control={form.control} name="notes" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Notes</FormLabel>
+                    <FormLabel>AI Notes</FormLabel>
                     <FormControl>
                       <Textarea 
-                        placeholder="Any additional context, interview notes, etc." 
-                        className="min-h-[120px]"
+                        placeholder="AI-extracted summary from the email..." 
+                        className="min-h-[100px]"
                         {...field}
                         value={field.value || ''}
                       />

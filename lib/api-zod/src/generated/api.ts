@@ -163,6 +163,10 @@ export const ListApplicationsResponseItem = zod.object({
   emailAddress: zod.string().nullable(),
   result: zod.string().describe("interview, next-stage, rejected, no-response"),
   notes: zod.string().nullable(),
+  comment: zod
+    .string()
+    .nullish()
+    .describe("Free-text user comment on this application"),
   sourceEmailId: zod
     .string()
     .nullable()
@@ -186,6 +190,7 @@ export const CreateApplicationBody = zod.object({
   emailAddress: zod.string().nullish(),
   result: zod.string(),
   notes: zod.string().nullish(),
+  comment: zod.string().nullish(),
 });
 
 /**
@@ -222,6 +227,10 @@ export const GetApplicationsSummaryResponse = zod.object({
         .string()
         .describe("interview, next-stage, rejected, no-response"),
       notes: zod.string().nullable(),
+      comment: zod
+        .string()
+        .nullish()
+        .describe("Free-text user comment on this application"),
       sourceEmailId: zod
         .string()
         .nullable()
@@ -259,6 +268,10 @@ export const GetApplicationResponse = zod.object({
   emailAddress: zod.string().nullable(),
   result: zod.string().describe("interview, next-stage, rejected, no-response"),
   notes: zod.string().nullable(),
+  comment: zod
+    .string()
+    .nullish()
+    .describe("Free-text user comment on this application"),
   sourceEmailId: zod
     .string()
     .nullable()
@@ -285,6 +298,7 @@ export const UpdateApplicationBody = zod.object({
   emailAddress: zod.string().nullish(),
   result: zod.string().optional(),
   notes: zod.string().nullish(),
+  comment: zod.string().nullish(),
 });
 
 export const UpdateApplicationResponse = zod.object({
@@ -306,6 +320,10 @@ export const UpdateApplicationResponse = zod.object({
   emailAddress: zod.string().nullable(),
   result: zod.string().describe("interview, next-stage, rejected, no-response"),
   notes: zod.string().nullable(),
+  comment: zod
+    .string()
+    .nullish()
+    .describe("Free-text user comment on this application"),
   sourceEmailId: zod
     .string()
     .nullable()
