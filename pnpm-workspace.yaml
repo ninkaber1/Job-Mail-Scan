@@ -75,6 +75,14 @@ onlyBuiltDependencies:
   - unrs-resolver
 
 overrides:
+  # Security vulnerability fixes — force patched versions for transitive deps
+  "picomatch@2": "2.3.2"
+  "picomatch@4": "4.0.4"
+  "path-to-regexp@8": "8.4.2"
+  "lodash": "4.18.1"
+  "yaml@2": "2.8.4"
+  "brace-expansion@2": "2.0.3"
+  "postcss@8": "8.5.14"
   # replit uses linux-x64 only, we can exclude all other platforms
   "esbuild>@esbuild/darwin-arm64": "-"
   "esbuild>@esbuild/darwin-x64": "-"
