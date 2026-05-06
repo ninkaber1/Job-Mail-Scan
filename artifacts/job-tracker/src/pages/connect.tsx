@@ -72,9 +72,24 @@ const connectFormSchema = z
     },
   );
 
+const PRESETS: { value: string; label: string; days?: number }[] = [
+  { value: "30", label: "Last 30 days", days: 30 },
+  { value: "60", label: "Last 60 days", days: 60 },
+  { value: "90", label: "Last 90 days", days: 90 },
+  { value: "365", label: "Last year", days: 365 },
+  { value: "custom", label: "Custom range…" },
+];
+
+function presetToDateFrom(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString().split("T")[0];
+}
+
 const scanFormSchema = z.object({
-  dateFrom: z.string().min(1, "Start date required"),
-  dateTo: z.string().min(1, "End date required"),
+  preset: z.string().default("90"),
+  dateFrom: z.string().optional(),
+  dateTo: z.string().optional(),
   maxEmails: z.coerce.number().min(10).max(1000).default(200),
   clearPrevious: z.boolean().default(true),
 });
@@ -114,16 +129,9 @@ export default function ConnectEmail() {
     },
   });
 
-  const defaultDateFrom = (() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 90);
-    return d.toISOString().split("T")[0];
-  })();
-  const defaultDateTo = new Date().toISOString().split("T")[0];
-
   const scanForm = useForm<z.infer<typeof scanFormSchema>>({
     resolver: zodResolver(scanFormSchema),
-    defaultValues: { dateFrom: defaultDateFrom, dateTo: defaultDateTo, maxEmails: 200, clearPrevious: true },
+    defaultValues: { preset: "90", dateFrom: "", dateTo: "", maxEmails: 200, clearPrevious: true },
   });
 
   const watchProvider = connectForm.watch("provider");
@@ -209,8 +217,18 @@ export default function ConnectEmail() {
   };
 
   const onScan = (data: z.infer<typeof scanFormSchema>) => {
+    let dateFrom: string | undefined;
+    let dateTo: string | undefined;
+    const preset = PRESETS.find((p) => p.value === data.preset);
+    if (data.preset === "custom") {
+      dateFrom = data.dateFrom || undefined;
+      dateTo = data.dateTo || undefined;
+    } else if (preset?.days) {
+      dateFrom = presetToDateFrom(preset.days);
+      dateTo = undefined;
+    }
     scanEmails.mutate(
-      { data },
+      { data: { maxEmails: data.maxEmails, clearPrevious: data.clearPrevious, dateFrom, dateTo } },
       {
         onSuccess: (result) => {
           toast({
@@ -576,35 +594,40 @@ export default function ConnectEmail() {
                 onSubmit={scanForm.handleSubmit(onScan)}
                 className="space-y-4"
               >
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <FormField
                     control={scanForm.control}
-                    name="dateFrom"
+                    name="preset"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>From Date</FormLabel>
-                        <FormControl>
-                          <Input type="date" {...field} />
-                        </FormControl>
+                        <FormLabel>Time Window</FormLabel>
+                        <Select
+                          value={field.value}
+                          onValueChange={(v) => {
+                            field.onChange(v);
+                            if (v !== "custom") {
+                              scanForm.setValue("dateFrom", "");
+                              scanForm.setValue("dateTo", "");
+                            }
+                          }}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select period" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {PRESETS.map((p) => (
+                              <SelectItem key={p.value} value={p.value}>
+                                {p.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
-                  <FormField
-                    control={scanForm.control}
-                    name="dateTo"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>To Date</FormLabel>
-                        <FormControl>
-                          <Input type="date" {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
                   <FormField
                     control={scanForm.control}
                     name="maxEmails"
@@ -619,6 +642,46 @@ export default function ConnectEmail() {
                     )}
                   />
                 </div>
+
+                {scanForm.watch("preset") === "custom" && (
+                  <div className="grid grid-cols-2 gap-4 p-3 rounded-lg border bg-muted/30">
+                    <FormField
+                      control={scanForm.control}
+                      name="dateFrom"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>From Date</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="date"
+                              max={scanForm.watch("dateTo") || undefined}
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={scanForm.control}
+                      name="dateTo"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>To Date</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="date"
+                              min={scanForm.watch("dateFrom") || undefined}
+                              max={new Date().toISOString().split("T")[0]}
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                )}
 
                 <FormField
                   control={scanForm.control}

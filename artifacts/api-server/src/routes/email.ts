@@ -7,7 +7,7 @@ import {
   obfuscate,
   deobfuscate,
 } from "../lib/email-providers";
-import { scanEmails, testConnection, probeMailbox } from "../lib/email-scanner";
+import { scanEmails, scanEmailsViaGmailApi, testConnection, probeMailbox } from "../lib/email-scanner";
 import { eq, lt, and } from "drizzle-orm";
 
 const router: IRouter = Router();
@@ -225,19 +225,12 @@ router.post("/email/scan", async (req, res): Promise<void> => {
 
   const maxEmails = body.data.maxEmails ?? 200;
   const clearPrevious = body.data.clearPrevious !== false;
-
-  // Compute since: use dateFrom if provided, otherwise fall back to daysBack
-  const since = body.data.dateFrom
-    ? new Date(body.data.dateFrom)
-    : (() => { const d = new Date(); d.setDate(d.getDate() - (body.data.daysBack ?? 90)); return d; })();
-
-  // Compute until: end of dateTo if provided, otherwise no upper bound
-  const until = body.data.dateTo
-    ? (() => { const d = new Date(body.data.dateTo!); d.setHours(23, 59, 59, 999); return d; })()
-    : null;
+  const daysBack = body.data.daysBack ?? 90;
+  const dateFrom = body.data.dateFrom ?? null;
+  const dateTo = body.data.dateTo ?? null;
 
   req.log.info(
-    { since: since.toISOString(), until: until?.toISOString() ?? "now", maxEmails, clearPrevious, accounts: sessions.length },
+    { dateFrom, dateTo, daysBack, maxEmails, clearPrevious, accounts: sessions.length },
     "Starting email scan",
   );
 
@@ -247,49 +240,56 @@ router.post("/email/scan", async (req, res): Promise<void> => {
   let totalDeleted = 0;
 
   for (const session of sessions) {
-    let config;
-    try {
-      config = getProviderConfig(
-        session.provider,
-        session.imapHost,
-        session.imapPort ? parseInt(session.imapPort, 10) : null,
-      );
-    } catch (err) {
-      req.log.warn({ err, email: session.email }, "Skipping session with invalid provider config");
-      continue;
-    }
+    req.log.info({ email: session.email, authType: session.authType, dateFrom, dateTo, daysBack, maxEmails }, "Scanning session");
 
-    let credentials: { password: string } | { oauthToken: string };
+    let scanned: { results: Awaited<ReturnType<typeof scanEmails>>["results"]; sinceDate: Date };
 
     if (session.authType === "oauth_google_native") {
+      let token: string;
       try {
-        const token = await getValidGoogleToken(session);
-        credentials = { oauthToken: token };
+        token = await getValidGoogleToken(session);
       } catch (err) {
         req.log.warn({ err, email: session.email }, "Skipping session: OAuth token refresh failed");
         continue;
       }
+      try {
+        scanned = await scanEmailsViaGmailApi(token, daysBack, maxEmails, dateFrom, dateTo);
+      } catch (err) {
+        req.log.error({ err, email: session.email }, "Gmail API scan failed for session");
+        continue;
+      }
     } else {
-      credentials = { password: deobfuscate(session.encryptedPassword) };
-    }
+      let config;
+      try {
+        config = getProviderConfig(
+          session.provider,
+          session.imapHost,
+          session.imapPort ? parseInt(session.imapPort, 10) : null,
+        );
+      } catch (err) {
+        req.log.warn({ err, email: session.email }, "Skipping session with invalid provider config");
+        continue;
+      }
 
-    req.log.info({ email: session.email, since: since.toISOString(), until: until?.toISOString() ?? "now", maxEmails }, "Scanning session");
+      const since = dateFrom ? new Date(dateFrom) : (() => { const d = new Date(); d.setDate(d.getDate() - daysBack); return d; })();
+      const until = dateTo ? (() => { const d = new Date(dateTo); d.setHours(23, 59, 59, 999); return d; })() : null;
 
-    let scanned: Awaited<ReturnType<typeof scanEmails>>;
-    try {
-      scanned = await scanEmails(
-        config.host,
-        config.port,
-        session.email,
-        credentials,
-        since,
-        until,
-        maxEmails,
-        session.provider,
-      );
-    } catch (err) {
-      req.log.error({ err, email: session.email }, "Email scan failed for session");
-      continue;
+      const credentials = { password: deobfuscate(session.encryptedPassword) };
+      try {
+        scanned = await scanEmails(
+          config.host,
+          config.port,
+          session.email,
+          credentials,
+          since,
+          until,
+          maxEmails,
+          session.provider,
+        );
+      } catch (err) {
+        req.log.error({ err, email: session.email }, "IMAP scan failed for session");
+        continue;
+      }
     }
 
     if (clearPrevious) {

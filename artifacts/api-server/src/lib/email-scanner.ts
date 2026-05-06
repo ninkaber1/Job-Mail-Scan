@@ -305,7 +305,214 @@ methodOfContact: use the platform if an interview link/invite is included (Zoom,
   }
 }
 
-// ─── Public API ──────────────────────────────────────────────────────────────
+// ─── Gmail REST API scanner ──────────────────────────────────────────────────
+
+interface GmailPart {
+  mimeType: string;
+  body: { data?: string; size: number };
+  parts?: GmailPart[];
+}
+
+interface GmailPayload extends GmailPart {
+  headers: Array<{ name: string; value: string }>;
+}
+
+interface GmailMessage {
+  id: string;
+  threadId: string;
+  payload: GmailPayload;
+  internalDate: string;
+}
+
+function getHeader(headers: Array<{ name: string; value: string }>, name: string): string {
+  return headers.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value ?? "";
+}
+
+function extractBody(payload: GmailPart): string {
+  if (payload.mimeType === "text/plain" && payload.body?.data) {
+    return Buffer.from(payload.body.data, "base64url").toString("utf-8");
+  }
+  if (payload.parts) {
+    for (const part of payload.parts) {
+      if (part.mimeType === "text/plain" && part.body?.data) {
+        return Buffer.from(part.body.data, "base64url").toString("utf-8");
+      }
+    }
+    for (const part of payload.parts) {
+      if (part.mimeType === "text/html" && part.body?.data) {
+        return Buffer.from(part.body.data, "base64url").toString("utf-8");
+      }
+    }
+    for (const part of payload.parts) {
+      if (part.parts) {
+        const body = extractBody(part);
+        if (body) return body;
+      }
+    }
+  }
+  if (payload.mimeType === "text/html" && payload.body?.data) {
+    return Buffer.from(payload.body.data, "base64url").toString("utf-8");
+  }
+  return "";
+}
+
+async function gmailApiFetch(accessToken: string, path: string): Promise<Response> {
+  return fetch(`https://gmail.googleapis.com/gmail/v1${path}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+}
+
+async function fetchMessageIds(
+  accessToken: string,
+  query: string,
+  maxResults: number,
+): Promise<string[]> {
+  const ids: string[] = [];
+  let pageToken: string | undefined;
+
+  while (ids.length < maxResults) {
+    const params = new URLSearchParams({
+      q: query,
+      maxResults: String(Math.min(500, maxResults - ids.length)),
+      includeSpamTrash: "true",
+    });
+    if (pageToken) params.set("pageToken", pageToken);
+
+    const res = await gmailApiFetch(accessToken, `/users/me/messages?${params}`);
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Gmail messages.list error: ${err}`);
+    }
+
+    const data = (await res.json()) as {
+      messages?: Array<{ id: string }>;
+      nextPageToken?: string;
+    };
+
+    if (data.messages) {
+      for (const m of data.messages) ids.push(m.id);
+    }
+
+    if (!data.nextPageToken || ids.length >= maxResults) break;
+    pageToken = data.nextPageToken;
+  }
+
+  return ids.slice(0, maxResults);
+}
+
+async function fetchMessage(accessToken: string, messageId: string): Promise<GmailMessage> {
+  const res = await gmailApiFetch(
+    accessToken,
+    `/users/me/messages/${messageId}?format=full`,
+  );
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Gmail messages.get error (${messageId}): ${err}`);
+  }
+  return res.json() as Promise<GmailMessage>;
+}
+
+export async function scanEmailsViaGmailApi(
+  accessToken: string,
+  daysBack: number = 90,
+  maxEmails: number = 200,
+  dateFrom: string | null = null,
+  dateTo: string | null = null,
+): Promise<{ results: ParsedApplication[]; sinceDate: Date }> {
+  const since = dateFrom ? new Date(dateFrom) : (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - daysBack);
+    return d;
+  })();
+
+  const until = dateTo ? (() => {
+    const d = new Date(dateTo);
+    d.setHours(23, 59, 59, 999);
+    return d;
+  })() : null;
+
+  const sinceStr = `${since.getFullYear()}/${String(since.getMonth() + 1).padStart(2, "0")}/${String(since.getDate()).padStart(2, "0")}`;
+
+  const subjectKeywords =
+    "interview OR offer OR application OR recruiter OR hiring OR opportunity OR screening OR assessment OR position OR job";
+  const atsFromClause = ATS_DOMAINS.map((d) => `from:${d}`).join(" OR ");
+
+  let query = `after:${sinceStr} (subject:(${subjectKeywords}) OR ${atsFromClause})`;
+  if (until) {
+    const beforeStr = `${until.getFullYear()}/${String(until.getMonth() + 1).padStart(2, "0")}/${String(until.getDate()).padStart(2, "0")}`;
+    query += ` before:${beforeStr}`;
+  }
+
+  logger.info({ query, since: since.toISOString(), until: until?.toISOString() ?? "now", maxEmails }, "Starting Gmail REST API scan");
+
+  const messageIds = await fetchMessageIds(accessToken, query, maxEmails);
+  logger.info({ count: messageIds.length }, "Gmail API: message IDs retrieved");
+
+  const results: ParsedApplication[] = [];
+  const seenIds = new Set<string>();
+  let excluded = 0;
+  let notJobRelated = 0;
+  let aiSkipped = 0;
+  let classified = 0;
+
+  for (const msgId of messageIds) {
+    try {
+      const msg = await fetchMessage(accessToken, msgId);
+      const headers = msg.payload.headers;
+
+      const subject = getHeader(headers, "Subject");
+      const fromRaw = getHeader(headers, "From");
+      const dateStr = getHeader(headers, "Date");
+      const messageId = getHeader(headers, "Message-ID") || msgId;
+
+      const fromMatch = fromRaw.match(/^(?:"?([^"<]*)"?\s*)?<?([^>]+)>?\s*$/);
+      const fromName = fromMatch?.[1]?.trim() || fromRaw;
+      const fromEmail = fromMatch?.[2]?.trim() || fromRaw;
+
+      const date = dateStr
+        ? new Date(dateStr)
+        : new Date(parseInt(msg.internalDate, 10));
+
+      if (seenIds.has(messageId)) continue;
+      seenIds.add(messageId);
+
+      const rawBody = extractBody(msg.payload);
+      const textBody = rawBody.startsWith("<") ? stripHtml(rawBody) : rawBody;
+
+      if (isExcluded(fromEmail, fromName, subject)) {
+        logger.info({ subject, fromEmail }, "Email excluded (newsletter/alert)");
+        excluded++;
+        continue;
+      }
+
+      if (!isJobRelated(fromEmail, subject, textBody)) {
+        logger.info({ subject, fromEmail }, "Email skipped (no job keywords)");
+        notJobRelated++;
+        continue;
+      }
+
+      logger.info({ subject, fromEmail, date: date.toISOString() }, "Sending to AI for classification");
+
+      const app = await classifyEmail(subject, fromName, fromEmail, textBody, date);
+      if (!app) {
+        aiSkipped++;
+        continue;
+      }
+
+      app.sourceEmailId = messageId;
+      results.push(app);
+      classified++;
+      logger.info({ subject, fromEmail, result: app.result, employer: app.employer }, "Email classified as job application");
+    } catch (err) {
+      logger.warn({ err, msgId }, "Failed to process Gmail message");
+    }
+  }
+
+  logger.info({ total: results.length, excluded, notJobRelated, aiSkipped, classified }, "Gmail REST API scan complete");
+  return { results, sinceDate: since };
+}
+
+// ─── IMAP scanner (App Password / non-Gmail OAuth) ───────────────────────────
 
 // ─── Job-related subject keywords for IMAP server-side search ────────────────
 
@@ -392,13 +599,12 @@ async function scanMailbox(
     uidDates.push({ uid: env.uid, date, fromKeyword: keywordSet.has(env.uid) });
   }
 
-  // Filter ALL emails by their actual Date: header (reliable), not INTERNALDATE (unreliable).
-  // Gmail re-indexes old emails with fresh INTERNALDATEs, so IMAP SINCE lets through stale mail.
-  // Apply the same since/until window to both keyword-matched and recency-fallback emails.
-  const filtered = uidDates.filter(({ date }) => {
-    if (date < since) return false;
+  // Keyword matches are filtered by actual Date: header (reliable).
+  // Recency fallback UIDs are already pre-filtered by IMAP SINCE; pass them through.
+  // Apply optional upper bound (until) to both sets.
+  const filtered = uidDates.filter(({ date, fromKeyword }) => {
     if (until && date > until) return false;
-    return true;
+    return !fromKeyword || date >= since;
   });
   filtered.sort((a, b) => b.date.getTime() - a.date.getTime());
   const messageUids = filtered.map((e) => e.uid);
