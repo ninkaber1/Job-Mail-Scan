@@ -392,12 +392,13 @@ async function scanMailbox(
     uidDates.push({ uid: env.uid, date, fromKeyword: keywordSet.has(env.uid) });
   }
 
-  // Keep keyword matches within the scan window (by Date: header),
-  // plus all recency fallback UIDs (already filtered by SINCE).
-  // Apply optional upper bound (until) to both sets.
-  const filtered = uidDates.filter(({ date, fromKeyword }) => {
+  // Filter ALL emails by their actual Date: header (reliable), not INTERNALDATE (unreliable).
+  // Gmail re-indexes old emails with fresh INTERNALDATEs, so IMAP SINCE lets through stale mail.
+  // Apply the same since/until window to both keyword-matched and recency-fallback emails.
+  const filtered = uidDates.filter(({ date }) => {
+    if (date < since) return false;
     if (until && date > until) return false;
-    return !fromKeyword || date >= since;
+    return true;
   });
   filtered.sort((a, b) => b.date.getTime() - a.date.getTime());
   const messageUids = filtered.map((e) => e.uid);
