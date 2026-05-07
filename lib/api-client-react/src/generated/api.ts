@@ -17,9 +17,11 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  ActivityEntry,
   Application,
   ApplicationsSummary,
   ConnectEmailBody,
+  CreateActivityBody,
   CreateApplicationBody,
   DisconnectEmailBody,
   DisconnectResponse,
@@ -30,6 +32,7 @@ import type {
   ListApplicationsParams,
   ScanEmailsBody,
   ScanEmailsResponse,
+  UpdateActivityBody,
   UpdateApplicationBody,
 } from "./api.schemas";
 
@@ -976,4 +979,337 @@ export const useDeleteApplication = <
   TContext
 > => {
   return useMutation(getDeleteApplicationMutationOptions(options));
+};
+
+/**
+ * Returns all job search activity log entries for the current user, sorted by date descending
+ * @summary List activity log entries
+ */
+export const getListActivityUrl = () => {
+  return `/api/activity`;
+};
+
+export const listActivity = async (
+  options?: RequestInit,
+): Promise<ActivityEntry[]> => {
+  return customFetch<ActivityEntry[]>(getListActivityUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListActivityQueryKey = () => {
+  return [`/api/activity`] as const;
+};
+
+export const getListActivityQueryOptions = <
+  TData = Awaited<ReturnType<typeof listActivity>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listActivity>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListActivityQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listActivity>>> = ({
+    signal,
+  }) => listActivity({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listActivity>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListActivityQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listActivity>>
+>;
+export type ListActivityQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List activity log entries
+ */
+
+export function useListActivity<
+  TData = Awaited<ReturnType<typeof listActivity>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listActivity>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListActivityQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Create an activity log entry
+ */
+export const getCreateActivityUrl = () => {
+  return `/api/activity`;
+};
+
+export const createActivity = async (
+  createActivityBody: CreateActivityBody,
+  options?: RequestInit,
+): Promise<ActivityEntry> => {
+  return customFetch<ActivityEntry>(getCreateActivityUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createActivityBody),
+  });
+};
+
+export const getCreateActivityMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createActivity>>,
+    TError,
+    { data: BodyType<CreateActivityBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createActivity>>,
+  TError,
+  { data: BodyType<CreateActivityBody> },
+  TContext
+> => {
+  const mutationKey = ["createActivity"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createActivity>>,
+    { data: BodyType<CreateActivityBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createActivity(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateActivityMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createActivity>>
+>;
+export type CreateActivityMutationBody = BodyType<CreateActivityBody>;
+export type CreateActivityMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Create an activity log entry
+ */
+export const useCreateActivity = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createActivity>>,
+    TError,
+    { data: BodyType<CreateActivityBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createActivity>>,
+  TError,
+  { data: BodyType<CreateActivityBody> },
+  TContext
+> => {
+  return useMutation(getCreateActivityMutationOptions(options));
+};
+
+/**
+ * @summary Update an activity log entry
+ */
+export const getUpdateActivityUrl = (id: number) => {
+  return `/api/activity/${id}`;
+};
+
+export const updateActivity = async (
+  id: number,
+  updateActivityBody: UpdateActivityBody,
+  options?: RequestInit,
+): Promise<ActivityEntry> => {
+  return customFetch<ActivityEntry>(getUpdateActivityUrl(id), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateActivityBody),
+  });
+};
+
+export const getUpdateActivityMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateActivity>>,
+    TError,
+    { id: number; data: BodyType<UpdateActivityBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateActivity>>,
+  TError,
+  { id: number; data: BodyType<UpdateActivityBody> },
+  TContext
+> => {
+  const mutationKey = ["updateActivity"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateActivity>>,
+    { id: number; data: BodyType<UpdateActivityBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateActivity(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateActivityMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateActivity>>
+>;
+export type UpdateActivityMutationBody = BodyType<UpdateActivityBody>;
+export type UpdateActivityMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Update an activity log entry
+ */
+export const useUpdateActivity = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateActivity>>,
+    TError,
+    { id: number; data: BodyType<UpdateActivityBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateActivity>>,
+  TError,
+  { id: number; data: BodyType<UpdateActivityBody> },
+  TContext
+> => {
+  return useMutation(getUpdateActivityMutationOptions(options));
+};
+
+/**
+ * @summary Delete an activity log entry
+ */
+export const getDeleteActivityUrl = (id: number) => {
+  return `/api/activity/${id}`;
+};
+
+export const deleteActivity = async (
+  id: number,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getDeleteActivityUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteActivityMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteActivity>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteActivity>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  const mutationKey = ["deleteActivity"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteActivity>>,
+    { id: number }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return deleteActivity(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteActivityMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteActivity>>
+>;
+
+export type DeleteActivityMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Delete an activity log entry
+ */
+export const useDeleteActivity = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteActivity>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteActivity>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  return useMutation(getDeleteActivityMutationOptions(options));
 };

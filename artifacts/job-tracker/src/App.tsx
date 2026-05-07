@@ -14,6 +14,7 @@ import Dashboard from "@/pages/dashboard";
 import ConnectEmail from "@/pages/connect";
 import ApplicationsList from "@/pages/applications";
 import ApplicationForm from "@/pages/applications-form";
+import ActivityLog from "@/pages/activity";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -158,6 +159,7 @@ function AppRoutes() {
           <Route path="/applications" component={ApplicationsList} />
           <Route path="/applications/new" component={ApplicationForm} />
           <Route path="/applications/:id" component={ApplicationForm} />
+          <Route path="/activity" component={ActivityLog} />
           <Route component={NotFound} />
         </Switch>
       </AppLayout>

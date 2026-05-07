@@ -188,6 +188,25 @@ export interface UpdateApplicationBody {
   comment?: string | null;
 }
 
+export interface ActivityEntry {
+  id: number;
+  /** ISO date string (YYYY-MM-DD) */
+  date: string;
+  description: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateActivityBody {
+  date: string;
+  description: string;
+}
+
+export interface UpdateActivityBody {
+  date?: string;
+  description?: string;
+}
+
 export type ApplicationsSummaryByResult = {
   interview: number;
   nextStage: number;

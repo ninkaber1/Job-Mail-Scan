@@ -5,6 +5,7 @@ import {
   LayoutDashboard, 
   Mail, 
   BriefcaseBusiness,
+  ClipboardList,
   Menu,
   LogOut,
 } from "lucide-react";
@@ -21,6 +22,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const navigation = [
     { name: "Dashboard", href: "/", icon: LayoutDashboard },
     { name: "Applications", href: "/applications", icon: BriefcaseBusiness },
+    { name: "Activity Log", href: "/activity", icon: ClipboardList },
     { name: "Email Setup", href: "/connect", icon: Mail },
   ];
 

@@ -339,3 +339,51 @@ export const UpdateApplicationResponse = zod.object({
 export const DeleteApplicationParams = zod.object({
   id: zod.coerce.number(),
 });
+
+/**
+ * Returns all job search activity log entries for the current user, sorted by date descending
+ * @summary List activity log entries
+ */
+export const ListActivityResponseItem = zod.object({
+  id: zod.number(),
+  date: zod.string().describe("ISO date string (YYYY-MM-DD)"),
+  description: zod.string(),
+  createdAt: zod.string(),
+  updatedAt: zod.string(),
+});
+export const ListActivityResponse = zod.array(ListActivityResponseItem);
+
+/**
+ * @summary Create an activity log entry
+ */
+export const CreateActivityBody = zod.object({
+  date: zod.string(),
+  description: zod.string(),
+});
+
+/**
+ * @summary Update an activity log entry
+ */
+export const UpdateActivityParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const UpdateActivityBody = zod.object({
+  date: zod.string().optional(),
+  description: zod.string().optional(),
+});
+
+export const UpdateActivityResponse = zod.object({
+  id: zod.number(),
+  date: zod.string().describe("ISO date string (YYYY-MM-DD)"),
+  description: zod.string(),
+  createdAt: zod.string(),
+  updatedAt: zod.string(),
+});
+
+/**
+ * @summary Delete an activity log entry
+ */
+export const DeleteActivityParams = zod.object({
+  id: zod.coerce.number(),
+});
