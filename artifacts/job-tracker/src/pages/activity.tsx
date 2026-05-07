@@ -142,26 +142,24 @@ export default function ActivityLog() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Activity Log</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
+          <h1 className="text-3xl font-bold tracking-tight">Activity Log</h1>
+          <p className="text-muted-foreground mt-1">
             Track your job search activities — networking, outreach, research, and more.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2 w-full sm:w-auto">
           <Button
             variant="outline"
-            size="sm"
-            className="gap-2"
             onClick={() => exportCsv(entries)}
             disabled={entries.length === 0}
           >
-            <Download className="w-4 h-4" />
+            <Download className="w-4 h-4 mr-2" />
             Export
           </Button>
-          <Button size="sm" className="gap-2" onClick={() => setShowAdd(true)}>
-            <Plus className="w-4 h-4" />
+          <Button onClick={() => setShowAdd(true)}>
+            <Plus className="w-4 h-4 mr-2" />
             Add
           </Button>
         </div>
