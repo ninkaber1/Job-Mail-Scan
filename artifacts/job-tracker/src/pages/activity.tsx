@@ -158,11 +158,11 @@ export default function ActivityLog() {
             disabled={entries.length === 0}
           >
             <Download className="w-4 h-4" />
-            Export CSV
+            Export
           </Button>
           <Button size="sm" className="gap-2" onClick={() => setShowAdd(true)}>
             <Plus className="w-4 h-4" />
-            Add Entry
+            Add
           </Button>
         </div>
       </div>
@@ -262,7 +262,7 @@ export default function ActivityLog() {
               Cancel
             </Button>
             <Button onClick={handleAdd} disabled={createActivity.isPending}>
-              {createActivity.isPending ? "Adding…" : "Add Entry"}
+              {createActivity.isPending ? "Adding…" : "Add"}
             </Button>
           </DialogFooter>
         </DialogContent>

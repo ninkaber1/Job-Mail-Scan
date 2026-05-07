@@ -217,7 +217,7 @@ export default function ApplicationsList() {
           <Link href="/applications/new">
             <Button>
               <Plus className="w-4 h-4 mr-2" />
-              Add Manual
+              Add
             </Button>
           </Link>
         </div>
