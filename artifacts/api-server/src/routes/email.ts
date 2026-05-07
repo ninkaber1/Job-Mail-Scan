@@ -8,7 +8,7 @@ import {
   deobfuscate,
 } from "../lib/email-providers";
 import { scanEmails, scanEmailsViaGmailApi, testConnection, probeMailbox } from "../lib/email-scanner";
-import { eq, lt, and } from "drizzle-orm";
+import { eq, lt, and, sql } from "drizzle-orm";
 
 const router: IRouter = Router();
 
@@ -314,7 +314,8 @@ router.post("/email/scan", async (req, res): Promise<void> => {
     let updated = 0;
 
     for (const app of scanned.results) {
-      const existing = await db
+      // 1. Re-scan dedup: same email already in DB — refresh fields in place
+      const existingById = await db
         .select()
         .from(applicationsTable)
         .where(
@@ -325,7 +326,7 @@ router.post("/email/scan", async (req, res): Promise<void> => {
         )
         .limit(1);
 
-      if (existing.length > 0) {
+      if (existingById.length > 0) {
         await db
           .update(applicationsTable)
           .set({
@@ -335,12 +336,52 @@ router.post("/email/scan", async (req, res): Promise<void> => {
             interviewerInfo: app.interviewerInfo,
             methodOfContact: app.methodOfContact,
           })
-          .where(eq(applicationsTable.id, existing[0].id));
+          .where(eq(applicationsTable.id, existingById[0].id));
         updated++;
-      } else {
-        await db.insert(applicationsTable).values({ ...app, userId });
-        added++;
+        continue;
       }
+
+      // 2. Same employer+position — new email about an existing application
+      const empNorm = app.employer?.toLowerCase().trim() ?? null;
+      const posNorm = app.position?.toLowerCase().trim() ?? null;
+
+      if (empNorm && posNorm) {
+        const existingByJob = await db
+          .select()
+          .from(applicationsTable)
+          .where(
+            and(
+              eq(applicationsTable.userId, userId),
+              sql`lower(trim(${applicationsTable.employer})) = ${empNorm}`,
+              sql`lower(trim(${applicationsTable.position})) = ${posNorm}`,
+            ),
+          )
+          .limit(1);
+
+        if (existingByJob.length > 0) {
+          const match = existingByJob[0];
+          // Only update if this email is at least as recent as what we have
+          if (app.dateOfContact >= match.dateOfContact) {
+            await db
+              .update(applicationsTable)
+              .set({
+                dateOfContact: app.dateOfContact,
+                result: app.result,
+                notes: app.notes,
+                contactName: app.contactName,
+                interviewerInfo: app.interviewerInfo,
+                methodOfContact: app.methodOfContact,
+              })
+              .where(eq(applicationsTable.id, match.id));
+          }
+          updated++;
+          continue;
+        }
+      }
+
+      // 3. Genuinely new application — insert
+      await db.insert(applicationsTable).values({ ...app, userId });
+      added++;
     }
 
     await db

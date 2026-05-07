@@ -255,11 +255,11 @@ If classifying:
 }
 
 Result rules:
-- "interview" — they are scheduling or inviting you to an interview
-- "next-stage" — you're advancing but no interview scheduled yet, or you received an offer
+- "interview" — they are scheduling or inviting you to an interview (phone screen, video call, on-site, technical screen)
+- "next-stage" — you are genuinely advancing beyond initial submission: offer received, take-home assignment sent, additional round confirmed but not yet scheduled. Must be a clear step BEYOND the initial application — NOT a simple submission confirmation
 - "rejected" — application was declined / "not moving forward" / "other candidates"
-- "applied" — application receipt confirmation only: "thank you for applying", "we received your application", "your application has been submitted" — no outcome yet
-- "no-response" — job-related but none of the above categories fit
+- "applied" — any initial submission confirmation: "thank you for applying", "we received your application", "your application has been submitted"; also use this when a recruiter confirms they have submitted or forwarded your resume/profile to a client or hiring manager — no interview or offer yet
+- "no-response" — job-related email but none of the above fit
 
 methodOfContact: use the platform if an interview link/invite is included (Zoom, Teams, Google Meet); otherwise "email".`;
 
