@@ -47,11 +47,11 @@ function getFrontendBase(): string {
   return "";
 }
 
-/** Returns whether Google OAuth is configured (client ID + secret both present) */
+/** Returns whether Google OAuth is configured and the required callback URL */
 router.get("/auth/google/status", (_req, res): void => {
   const configured =
     !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
-  res.json({ configured });
+  res.json({ configured, callbackUrl: getCallbackUrl() });
 });
 
 /** Redirects the user to Google's OAuth consent screen */
@@ -108,7 +108,7 @@ router.get("/auth/google/callback", async (req, res): Promise<void> => {
   }
 
   const stateData = verifyState(state);
-  if (!stateData) {
+  if (!stateData || !stateData.userId) {
     res.redirect(`${frontendBase}/connect?error=invalid_state`);
     return;
   }

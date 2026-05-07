@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useUser } from "@clerk/react";
@@ -45,6 +45,8 @@ import {
   ExternalLink,
   Mail,
   Plus,
+  Copy,
+  Check,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -99,6 +101,7 @@ export default function ConnectEmail() {
   const queryClient = useQueryClient();
   const { user, isLoaded: isUserLoaded } = useUser();
   const [showAddForm, setShowAddForm] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const { data: status, isLoading: isStatusLoading } = useGetEmailStatus();
   const connectEmail = useConnectEmail();
@@ -109,9 +112,18 @@ export default function ConnectEmail() {
     queryKey: ["google-auth-status"],
     queryFn: async () => {
       const res = await fetch("/api/auth/google/status");
-      return res.json() as Promise<{ configured: boolean }>;
+      return res.json() as Promise<{ configured: boolean; callbackUrl: string }>;
     },
   });
+
+  const copyCallbackUrl = useCallback(() => {
+    const url = googleAuthStatus?.callbackUrl;
+    if (!url) return;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [googleAuthStatus?.callbackUrl]);
 
   const googleAccount = isUserLoaded
     ? user?.externalAccounts?.find((a) => a.provider === "google")
@@ -489,7 +501,7 @@ export default function ConnectEmail() {
               Sign in with Google once. No app password needed, no credentials stored.
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
             <Button
               className="w-full gap-2"
               variant="outline"
@@ -503,6 +515,36 @@ export default function ConnectEmail() {
               </svg>
               Continue with Google
             </Button>
+            {googleAuthStatus?.callbackUrl && (
+              <Alert className="bg-slate-50 border-slate-200">
+                <AlertCircle className="h-4 w-4 text-slate-500" />
+                <AlertTitle className="text-slate-700 text-sm font-medium">Google Cloud Console setup required</AlertTitle>
+                <AlertDescription className="text-slate-600 text-xs space-y-2 mt-1">
+                  <p>This exact URL must be added to your OAuth 2.0 credentials under <strong>Authorized redirect URIs</strong>:</p>
+                  <div className="flex items-center gap-2 bg-white border border-slate-200 rounded px-3 py-2 font-mono text-xs break-all">
+                    <span className="flex-1">{googleAuthStatus.callbackUrl}</span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 shrink-0 text-slate-500 hover:text-slate-700"
+                      onClick={copyCallbackUrl}
+                      title="Copy URL"
+                    >
+                      {copied ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                    </Button>
+                  </div>
+                  <a
+                    href="https://console.cloud.google.com/apis/credentials"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-700 font-medium"
+                  >
+                    Open Google Cloud Console <ExternalLink className="h-3 w-3" />
+                  </a>
+                </AlertDescription>
+              </Alert>
+            )}
           </CardContent>
         </Card>
       )}

@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, bigint, index } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, bigint, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 
 export const emailSessionsTable = pgTable(
@@ -25,7 +25,10 @@ export const emailSessionsTable = pgTable(
       .defaultNow()
       .$onUpdate(() => new Date()),
   },
-  (t) => [index("email_sessions_user_id_idx").on(t.userId)],
+  (t) => [
+    index("email_sessions_user_id_idx").on(t.userId),
+    uniqueIndex("email_sessions_user_id_email_unique").on(t.userId, t.email),
+  ],
 );
 
 export const insertEmailSessionSchema = createInsertSchema(
